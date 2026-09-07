@@ -21,7 +21,8 @@ git commit. Tick the checkboxes in this file as you go so progress survives cont
 | Concurrency defaults | App target: `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`, `SWIFT_APPROACHABLE_CONCURRENCY = YES`. Core package: `nonisolated` default, strict concurrency complete | UI code is main-actor by default with zero annotations; Core stays explicit and portable |
 | Code split | Local SPM package `Packages/PostfrauCore` (pure Swift, Foundation only, zero UI) + app target `Postfrau` | Core is testable with plain `swift test` in seconds; UI stays thin |
 | Third-party deps | None in v1 | Fewer moving parts. Revisit only with a written justification in this file |
-| Persistence | JSON files (collections, environments, globals, UI state) in Application Support + Keychain for secrets + capped JSONL for history | Human-readable, git/iCloud-friendly, trivial to back up. No SwiftData/CoreData |
+| Persistence | JSON files (collections, environments, globals) in a **user-selectable data folder** + Keychain for secrets + local-only JSONL history and UI state in Application Support | Human-readable, one file per collection, sync-friendly, trivial to back up. No SwiftData/CoreData |
+| Sync | **Data folder** the user points at iCloud Drive / Google Drive / Dropbox / a git repo. Postfrau watches the folder and reloads external changes, writes conflict copies instead of clobbering. Secrets ride iCloud Keychain (`kSecAttrSynchronizable`), never the folder | Works with any sync client, zero servers, no Apple Developer Program needed. A native iCloud (ubiquity) container needs the iCloud entitlement → paid Developer Program and a signed build; deferred to §9 |
 | Networking | `URLSession` with a delegate (TLS override, redirect control, `URLSessionTaskMetrics`) | HTTP/1.1, HTTP/2, HTTP/3, system proxies, for free |
 | Concurrency | Swift 6 strict concurrency, `async/await`, actors for executor and persistence; `@concurrent` for CPU-heavy work (pretty-print, highlight, import) | Correctness by construction |
 | Sandbox | App Sandbox ON with `network.client` + `files.user-selected.read-write` | Keeps App Store / notarization path open; costs nothing now |
@@ -43,6 +44,7 @@ git commit. Tick the checkboxes in this file as you go so progress survives cont
 8. Quick open (⌘K) fuzzy finder over all requests.
 9. Settings window; keyboard-first workflow; full menu bar.
 10. Handles big data gracefully: 5 000-request collections, 50 MB responses.
+11. Sync across Macs by choosing a data folder inside iCloud Drive / Google Drive / Dropbox (Settings ▸ Data), with external-change detection and conflict copies. Secrets sync via iCloud Keychain, opt-in.
 
 ### Out of scope (v1)
 Collaboration, sync, accounts, workspaces, mock servers, monitors, load tests, scripting, GraphQL,
@@ -69,7 +71,7 @@ postfrau/
 │       │   ├── Model/          Collection, Folder, RequestItem, Environment, Variable, Auth, Body, HistoryEntry, Ids
 │       │   ├── Resolve/        VariableResolver, Scope, DynamicVariables
 │       │   ├── HTTP/           HTTPExecutor (actor), RequestBuilder, HTTPResponse, Timing, SessionDelegate
-│       │   ├── Persistence/    WorkspaceStore (actor), AtomicFile, HistoryLog, Keychain, Migrations
+│       │   ├── Persistence/    WorkspaceStore (actor), DataFolder, AtomicFile, CoordinatedFile, FolderWatcher, ConflictResolver, HistoryLog, Keychain, Migrations
 │       │   ├── Interop/        PostmanV21Importer/Exporter, PostmanEnvironment, CurlParser, CurlFormatter
 │       │   ├── Text/           JSONPrettyPrinter, XMLPrettyPrinter, ContentTypeSniffer
 │       │   └── Util/           FuzzyMatcher, ByteCount, Debouncer
@@ -87,12 +89,12 @@ postfrau/
 │   │   ├── Response/           ResponsePane, ResponseBodyView, ResponsePreview (SwiftUI WebView), ResponseHeadersView, CookiesView, TimingPopover, FindBar
 │   │   ├── Environments/       EnvironmentsWindow, VariablesEditor
 │   │   ├── QuickOpen/          QuickOpenPanel
-│   │   ├── Settings/           SettingsView
+│   │   ├── Settings/           SettingsView, DataLocationPane, SyncStatusBanner
 │   │   └── Components/         CodeTextView (NSTextView wrapper), TokenTextField (URL field w/ {{var}} highlighting), Badge, EmptyState
 │   ├── Highlighting/           SyntaxHighlighter protocol, JSONHighlighter, XMLHighlighter, Theme
 │   ├── Resources/              Assets.xcassets, Postfrau.icon (Icon Composer bundle), SampleCollection.json, Postfrau.entitlements, Info.plist
 │   └── Support/                Pasteboard, FileDialogs, KeychainBridge
-├── PostfrauUITests/            ← minimal XCUITest smoke (Phase 10)
+├── PostfrauUITests/            ← minimal XCUITest smoke (Phase 11)
 ├── Scripts/
 │   ├── bootstrap.sh            (brew install xcodegen if missing; xcodegen generate)
 │   ├── screenshot.sh           (launch app, capture main window to /tmp for visual checks)
@@ -169,22 +171,30 @@ table but dropped from the URL. Unencoded `{{vars}}` inside the query survive ro
 
 ## 4. On-disk format (docs/data-format.md — write it in Phase 1)
 
+Two roots. **Synced data** lives in the *data folder*, which the user can relocate. **Local state** never leaves the machine.
+
 ```
-~/Library/Containers/com.postfrau.Postfrau/Data/Library/Application Support/Postfrau/
-├── collections/<collectionUUID>.json      one file per collection (whole tree inside)
-├── environments/<environmentUUID>.json
-├── globals.json
-├── ui-state.json                          open tabs (ids + unsaved drafts), selection, sidebar width, window frame, active env
-├── history.jsonl                          one HistoryEntry per line, newest appended; pruned to `maxHistoryEntries` (default 1000) on launch and every 100 writes
-└── settings.json
+DATA FOLDER  (default: ~/Library/Application Support/Postfrau/Data — relocatable, see Phase 9)
+├── postfrau-workspace.json     marker: { schemaVersion, workspaceID, createdAt, createdBy: hostname, appVersion }
+├── collections/<collectionUUID>.json      one file per collection (whole tree inside), carries `revision` + `updatedAt`
+├── environments/<environmentUUID>.json    values of secret variables are "" on disk
+└── globals.json
+
+LOCAL  (~/Library/Containers/com.postfrau.Postfrau/Data/Library/Application Support/Postfrau/)
+├── settings.json               includes data-folder security-scoped bookmark + last known path
+├── ui-state.json               open tabs (ids + unsaved drafts), selection, sidebar width, window frame, active env
+├── history.jsonl               one HistoryEntry per line; pruned to `maxHistoryEntries` (default 1000) on launch and every 100 writes
+└── conflicts/                  copies produced by ConflictResolver, surfaced in the UI until dismissed
 ```
-Rules: all writes atomic (write temp in same dir, `rename`). Debounced autosave (300 ms) after any
+Rules: all writes atomic (write temp in same dir, `rename`) and, inside the data folder, wrapped in
+`NSFileCoordinator` so iCloud Drive / Dropbox see complete files. Debounced autosave (300 ms) after any
 model mutation; explicit flush on quit and on window close. Reads tolerate unknown keys. A
 `schemaVersion` bump requires a migration function in `Migrations.swift` and a fixture test.
-Keychain: service `com.postfrau.secrets`, account `"\(environmentID).\(variableKey)"`, `kSecAttrAccessibleAfterFirstUnlock`.
+Every synced document carries `revision: Int` (incremented on each write) and `updatedAt`; the store
+remembers the `(revision, mtime, sha256)` it last wrote per file to tell its own writes from foreign ones.
+Keychain: service `com.postfrau.secrets`, account `"\(environmentID).\(variableKey)"`, `kSecAttrAccessibleAfterFirstUnlock`;
+`kSecAttrSynchronizable` follows the "Sync secrets via iCloud Keychain" setting.
 Deleting a variable or environment deletes its Keychain items.
-
----
 
 ## 5. UI specification
 
@@ -266,7 +276,7 @@ update checkboxes here → `git commit -m "Phase N: …"`. Never start phase N+1
       `SWIFT_STRICT_CONCURRENCY=complete`, `SWIFT_DEFAULT_ACTOR_ISOLATION=MainActor`, `SWIFT_APPROACHABLE_CONCURRENCY=YES`,
       `SWIFT_UPCOMING_FEATURE_NONISOLATED_NONSENDING_BY_DEFAULT=YES`), depends on local package `PostfrauCore`, entitlements (sandbox + network client +
       user-selected files r/w), Info.plist with `LSMinimumSystemVersion`, `CFBundleDisplayName`, document
-      types for `.json` import via drag (Phase 9), unit-test target `PostfrauTests`, UI-test target stub.
+      types for `.json` import via drag (Phase 10), unit-test target `PostfrauTests`, UI-test target stub.
 - [ ] `Makefile`, `Scripts/bootstrap.sh`, `Scripts/screenshot.sh`
       (`open` the app, `sleep 2`, `screencapture -l $(osascript … window id)` or simply `screencapture -x /tmp/postfrau.png` of the full screen; good enough for the agent to eyeball).
 - [ ] `PostfrauApp.swift` opens a window with placeholder three-pane layout and "Postfrau" text; confirm the
@@ -281,8 +291,9 @@ update checkboxes here → `git commit -m "Phase N: …"`. Never start phase N+1
 - [ ] All model types from §3 with explicit `CodingKeys` and `schemaVersion`.
 - [ ] `Item` enum encoding with `"type": "folder" | "request"` discriminator; tests for round-trip.
 - [ ] `WorkspaceStore` actor: `load()` → `Workspace`, `save(collection:)`, `delete(collectionID:)`,
-      same for environments, `saveGlobals`, `saveUIState`, `saveSettings`. Directory injectable for tests
-      (use a temp dir). Atomic writes. Debounced batching lives in the app layer, not here.
+      same for environments, `saveGlobals`, `saveUIState`, `saveSettings`. Takes a `DataFolder` (synced root)
+      and a local-state root, both injectable for tests (temp dirs). Atomic + coordinated writes. Records
+      `(revision, mtime, sha256)` per written file. Debounced batching lives in the app layer, not here.
 - [ ] `Keychain` wrapper (Security framework): get/set/delete generic password; tests run against a
       test service name and clean up after themselves (skip gracefully if Keychain is unavailable in CI).
 - [ ] `HistoryLog`: append(entry), load(limit:), clear(), prune(to:). JSONL, tolerant of a corrupt last line.
@@ -400,7 +411,41 @@ update checkboxes here → `git commit -m "Phase N: …"`. Never start phase N+1
 - [ ] History records failed sends too (with the error).
 - Acceptance: 1 000 entries load in < 200 ms at launch; filter is instant.
 
-### Phase 9 — Import / Export  ☐
+### Phase 9 — Sync via data folder  ☐
+Goal: pointing the data folder at `iCloud Drive/Postfrau` (or Google Drive, Dropbox, a git checkout) makes two Macs share collections and environments, without Postfrau ever running a server.
+- [ ] `DataFolder`: resolves the current root from `settings.json` (security-scoped bookmark → `startAccessingSecurityScopedResource`),
+      falls back to the default folder if the bookmark is stale, and exposes `status` (ok / missing / unreadable / stale bookmark).
+- [ ] Settings ▸ Data pane: current path + provider badge (detect iCloud Drive `Mobile Documents/com~apple~CloudDocs`,
+      Google Drive `CloudStorage/GoogleDrive-*`, Dropbox `CloudStorage/Dropbox`, plain folder), buttons:
+      **Use iCloud Drive…** (opens `NSOpenPanel` at the iCloud Drive root with "Postfrau" pre-suggested, `canCreateDirectories`),
+      **Choose Folder…**, **Reveal in Finder**, **Use Default Location**. Toggle: **Sync secrets via iCloud Keychain**.
+- [ ] Relocation flow (sheet): if the chosen folder is empty → *Move data here*; if it already contains
+      `postfrau-workspace.json` → *Use the data in this folder* (current local data is left in place and a
+      backup zip of it is written next to it) or *Merge* (import collections/environments with ids not present;
+      same-id conflicts keep the newer `revision` and write a conflict copy). Never delete the old folder.
+- [ ] `FolderWatcher`: `NSFilePresenter` on the data folder (gets iCloud/coordinated change notices) plus a
+      `DispatchSource` on the directory for plain folders; coalesces events for 500 ms, then diffs the folder:
+      new / changed / removed files by `(mtime, sha256)` vs the store's last-written record.
+- [ ] `ConflictResolver`: foreign change to a file with no unsaved local edits → reload in place (open tabs update,
+      drafts untouched). Foreign change while the same collection has unsaved local edits → keep local, save the
+      foreign version to `LOCAL/conflicts/<name>-<host>-<date>.json`, show a non-modal banner
+      "Acme API changed on another Mac" with *Keep mine* / *Take theirs* / *Show both* (opens the copy as a read-only collection).
+      Removed file → collection becomes "missing" in the sidebar with *Restore from memory* for one session.
+- [ ] iCloud specifics: request download of `.icloud` placeholders on launch (`startDownloadingUbiquitousItem`),
+      show a per-collection "downloading" spinner; ignore `NSFileVersion` conflict versions Apple creates (we make our own copies);
+      never hold a coordinated read open across an await.
+- [ ] Secrets: when the iCloud Keychain toggle changes, re-write all secret items with the new `kSecAttrSynchronizable`;
+      confirm in a test on this machine that a synchronizable item is readable back (behavior differs for unsigned builds — record findings in `docs/decisions.md`).
+- [ ] Status bar shows a sync-folder chip (provider icon, "watching", last external change time); clicking opens the Data pane.
+- [ ] Tests (Core): watcher diff logic with a temp folder mutated by a second process (`Process` running `cp`/`rm`),
+      conflict copy naming, merge rules, stale bookmark fallback. Manual: two app instances on one Mac
+      (`open -n` with `POSTFRAU_LOCAL_ROOT` env override for the second) pointed at the same folder edit the same collection.
+- Acceptance: choose an iCloud Drive folder; on a second Mac (or the second instance) the collection appears within
+  a few seconds of iCloud finishing upload; editing on both sides produces one conflict banner and no lost data;
+  removing the folder while running degrades gracefully to the "missing" status without a crash; secrets are present on
+  the second machine when the Keychain toggle is on and absent (masked, empty) when off.
+
+### Phase 10 — Import / Export  ☐
 - [ ] `PostmanV21Importer`: `info`, nested `item[]`, `request.url` as string OR object (`raw`, `host[]`,
       `path[]`, `query[]`, `variable[]`), `header[]`, `body` modes (`raw` + `options.raw.language`,
       `formdata` incl. `type: file` (record src path as display name only), `urlencoded`, `file`, none),
@@ -421,10 +466,10 @@ update checkboxes here → `git commit -m "Phase N: …"`. Never start phase N+1
   request from it successfully; export → re-import yields an identical model (test asserts equality
   modulo ids/timestamps).
 
-### Phase 10 — Polish & release  ☐
+### Phase 11 — Polish & release  ☐
 - [ ] Full menu bar (File/Edit/View/Request/Window/Help) with every shortcut from §5; Help ▸ Keyboard Shortcuts sheet.
-- [ ] Settings window: font size, response layout (vertical/horizontal), default timeout, default verify TLS,
-      max history, "Reveal data folder", "Reset sample collection".
+- [ ] Settings window: General (font size, response layout, default timeout, default verify TLS, max history),
+      Data (the Phase 9 pane), Advanced ("Reset sample collection", "Open local state folder").
 - [ ] Window/state restoration, multiple windows not required (single window app; ⌘N when window is closed reopens it).
 - [ ] Final app icon as an Icon Composer `.icon` bundle (layered glass, light/dark/clear/tinted variants), About window with version + license.
 - [ ] Accessibility pass: labels on everything; VoiceOver can operate URL bar, Send, tabs; check Reduce Transparency and Increase Contrast renderings.
@@ -449,6 +494,7 @@ update checkboxes here → `git commit -m "Phase N: …"`. Never start phase N+1
 4. **Never block the main thread:** network, file IO, pretty-printing, highlighting > 256 KB, import parsing all run off-main.
 5. **AppKit where SwiftUI hurts:** editors (`NSTextView`/TextKit 2), the URL token field, large outline performance if `List` proves slow (measure first).
 6. **Persist through one door:** every model mutation goes through `AppState` methods that mark dirty and schedule save. No view writes files.
+   Anything written to the data folder must be safe for a sync client to copy mid-way: atomic rename, coordinated, one document per file.
 7. **Tests first for Core:** every parser/formatter/resolver gets tests before wiring into UI. Fixtures live in `Tests/.../Fixtures`.
 8. **Verify visually:** after UI phases run `make run` then `Scripts/screenshot.sh` and look at the PNG (Read tool). Fix what looks wrong before declaring done.
 9. **Commit per phase** (or sub-phase if large) with message `Phase N: <summary>`. Keep `git status` clean of generated files.
@@ -468,6 +514,8 @@ update checkboxes here → `git commit -m "Phase N: …"`. Never start phase N+1
 | `URLSession` shares cookies globally across "profiles" | Use `URLSessionConfiguration.ephemeral` per profile with its own `HTTPCookieStorage`; `sendCookies=false` → `httpShouldSetCookies=false` |
 | Postman format edge cases | Preserve unknown JSON as `extras`; surface warnings instead of failing the import |
 | Big responses blow memory | Spill > 20 MB to temp file; viewer shows a window into the file; hard cap 200 MB |
+| Sync client delivers half-written or duplicated files (Dropbox "conflicted copy", iCloud placeholders, Google Drive renames) | Own-write fingerprinting, coordinated atomic writes, conflict copies instead of merges, ignore files that don't match `<uuid>.json` |
+| Sandbox loses access to the data folder (bookmark stale after the folder is moved) | `DataFolder.status` + banner with *Choose Folder…*; fall back to default folder read-only until resolved |
 | Precision loss pretty-printing JSON numbers | Tokenizer-based pretty printer; never round-trip through `JSONSerialization`/`Double` |
 | Liquid Glass over-applied → unreadable dense UI, or stale API names from pre-release docs | Glass on chrome only (§5); verify every SwiftUI 26 API against the local Xcode 26.6 SDK headers / docs before use; `docs/decisions.md` records any API that had to be swapped |
 | Default MainActor isolation makes Core types accidentally main-actor when moved into the app | Keep all models in Core; app target only holds views and `AppState` |
@@ -484,10 +532,13 @@ update checkboxes here → `git commit -m "Phase N: …"`. Never start phase N+1
 - **Code generation:** `CurlFormatter` generalizes to a `SnippetGenerator` protocol (Swift/URLSession, Python/requests, JS/fetch…).
 - **OpenAPI import:** new `Interop/OpenAPIImporter` producing a `Collection`.
 - **Cookie jar UI:** expose the per-profile `HTTPCookieStorage`.
+- **Native iCloud container:** if a paid Apple Developer Program membership becomes available, add the iCloud Documents
+  entitlement and offer "Postfrau in iCloud" as a one-click data location (`url(forUbiquityContainerIdentifier:)`);
+  `DataFolder` already abstracts the root, so this is a new provider, not a redesign. CloudKit is deliberately not planned: JSON files + Keychain cover the need.
 - **On-device assistance (optional, macOS 26 Foundation Models):** "describe this request in words", "explain this error", generate a request from a sentence. Strictly local, strictly optional, never required for any core flow.
 
 ## 10. Definition of done for v1
 
-- All Phase 0–10 boxes ticked; `make test` green; `Scripts/release.sh` produces a DMG that runs on a clean macOS 26 machine.
+- All Phase 0–11 boxes ticked; `make test` green; `Scripts/release.sh` produces a DMG that runs on a clean macOS 26 machine.
 - A user coming from Postman can import their collection and environment, switch environment, send
   requests with auth and bodies, read responses comfortably, and never sees a beachball.
