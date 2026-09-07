@@ -311,21 +311,24 @@ update checkboxes here → `git commit -m "Phase N: …"`. Never start phase N+1
 - [x] `docs/data-format.md`.
 - Acceptance: ≥ 40 unit tests, `make core-test` < 10 s.
 
-### Phase 2 — HTTP executor  ☐
-- [ ] `RequestBuilder`: `RequestItem` + resolved scope → `URLRequest` (+ `Body payload` as `Data` or
+### Phase 2 — HTTP executor  ☑
+- [x] `RequestBuilder`: `RequestItem` + resolved scope → `URLRequest` (+ `Body payload` as `Data` or
       streamed file). Handles: query merge & encoding (respect `encodeURL`), multipart/form-data with
       generated boundary and file parts, urlencoded, raw with correct `Content-Type` default per language
       (only if user didn't set one), auth application, `User-Agent: Postfrau/<version>` default, `Accept: */*` default,
       `Content-Length`. Tests for each body mode (inspect built request bytes).
-- [ ] `HTTPExecutor` actor: `send(_:settings:) async throws -> HTTPResponse`, cancellable via Task
-      cancellation. One `URLSession` per settings profile (TLS verify on/off, redirects on/off, cookies on/off)
-      cached in a dictionary; delegate implements `urlSession(_:didReceive challenge:)` (accept any cert only
-      when `verifyTLS == false`), redirect interception (record hops, stop when disabled or `maxRedirects` hit),
-      `didFinishCollecting metrics` → `Timing`. Body collected via `bytes(for:)` streaming; spill to a temp
-      file above 20 MB; hard cap 200 MB (fail with a clear error).
-- [ ] Reason phrase table for common status codes (URLSession doesn't give one).
-- [ ] Cookie extraction from `Set-Cookie` headers (parse manually; don't rely on the shared cookie storage).
-- [ ] Tests via a custom `URLProtocol` mock for: headers/body correctness, redirect recording, timeouts,
+- [x] `HTTPExecutor` actor: `send(_:settings:) async throws -> HTTPResponse`, cancellable via Task
+      cancellation. One `URLSession` per settings profile — `(verifyTLS, sendCookies)`, the settings that
+      cannot vary per request — cached in a dictionary, each with its own cookie storage; a per-send task
+      delegate implements `urlSession(_:task:didReceive challenge:)` (accept any cert only when
+      `verifyTLS == false`), redirect interception (record hops, stop when disabled or `maxRedirects` hit),
+      and `didFinishCollecting metrics` → `Timing`. Body collected via `download(for:delegate:)`, which
+      streams to disk with flat memory use (`bytes(for:)` measured ~40x slower — see `docs/decisions.md`
+      D9); bodies over 20 MB keep their file, smaller ones are read back into memory; hard cap 200 MB
+      enforced mid-transfer (fail with a clear error).
+- [x] Reason phrase table for common status codes (URLSession doesn't give one).
+- [x] Cookie extraction from `Set-Cookie` headers (parse manually; don't rely on the shared cookie storage).
+- [x] Tests via a custom `URLProtocol` mock for: headers/body correctness, redirect recording, timeouts,
       cancellation, large body spill, error mapping. Plus one opt-in live test against `https://httpbin.org`
       guarded by env var `POSTFRAU_LIVE_TESTS=1`.
 - Acceptance: `swift test` green; executing a GET to `https://example.com` from a throwaway CLI test prints

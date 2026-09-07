@@ -74,3 +74,31 @@ models use timestamps that are exact at that precision.
 matching item and returns `errSecSuccess`, and the call rejects `kSecMatchLimit`. Verified with a
 standalone probe: adding two items and deleting service-wide left one behind. `deleteAll` therefore
 repeats the delete until `errSecItemNotFound`, bounded so it can never spin forever.
+
+## D9 — `download(for:delegate:)` instead of `bytes(for:delegate:)` for response bodies
+
+**Phase 2.** `PLAN.md` §6 Phase 2 specified collecting the body via `bytes(for:)`. Measured on this
+machine against a local `http.server` (9.2 MB JSON):
+
+| Approach | 213 B body | 9.2 MB body |
+|---|---|---|
+| `data(for:)` | 10.8 ms | 8.0 ms |
+| `download(for:)` + read back | 3.9 ms | 13.4 ms |
+| `bytes(for:)` byte loop | 1.5 ms | **555.8 ms** |
+
+`URLSession.AsyncBytes` yields one `UInt8` per iteration, so a 20 MB response would spend well over
+a second in the loop — a visible stall in front of every large response, and precisely the case
+Phase 5 has to keep smooth. `download(for:)` streams to a file with flat memory use, which makes
+the spill-to-disk path free: bodies at or below 20 MB are read back into memory, larger ones keep
+their file. The 200 MB hard cap is enforced *during* the transfer by `TaskObserver`'s
+`didWriteData` callback, which cancels the task; the executor distinguishes that from a user
+cancel via a flag on the observer.
+
+## D10 — Session profiles key on TLS and cookies only
+
+**Phase 2.** `PLAN.md` §6 Phase 2 keyed the `URLSession` cache on "(TLS verify on/off, redirects
+on/off, cookies on/off)". Redirect policy and timeout are per-task — they are decided in the task
+delegate and on `URLRequest` — so including them would multiply the session cache for no reason.
+The profile is `(verifyTLS, sendCookies)`, which is exactly the set that cannot vary per request.
+Each profile gets its own `HTTPCookieStorage` so a request that opted out of cookies never sees
+another profile's session cookie.
