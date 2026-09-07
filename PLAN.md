@@ -4,6 +4,11 @@ Postfrau is a free, personal, native macOS HTTP client in the spirit of Postman:
 requests, organize them into collections, switch environments. No collaboration, no cloud, no
 load testing, no accounts. Fast, responsive, good UX. No Node.js anywhere in the stack.
 
+**Revision log** (re-read the affected sections when a new entry appears):
+- R1 — retargeted to macOS 26 only (§0, §5, Phase 0/3/5, Polish).
+- R2 — sync via user-chosen data folder (§0, §4, Phase 9).
+- R3 (2026-09-07, during Phase 3) — AI-native: `postfrau` CLI + skill as the agent interface, per-entry history files with recording levels and attribution, `Commands` layer in Core. Touches §0, §1, §2, §3, §4, §5, Phase 3 (one new item), Phase 8 (rewritten), new Phase 11, Polish is now Phase 12, §7, §8, §9.
+
 This document is the contract for the agent that builds it. Work phase by phase, in order.
 Every phase ends with a green `make test`, a manual check of its acceptance criteria, and one
 git commit. Tick the checkboxes in this file as you go so progress survives context loss.
@@ -28,6 +33,7 @@ git commit. Tick the checkboxes in this file as you go so progress survives cont
 | Sandbox | App Sandbox ON with `network.client` + `files.user-selected.read-write` | Keeps App Store / notarization path open; costs nothing now |
 | Bundle ID | `com.postfrau.Postfrau` | Placeholder, change freely |
 | License | MIT | "free" |
+| Agent interface | A `postfrau` **CLI** built from `PostfrauCore` (same package, second executable target), operating on the same data folder and history; a bundled **skill** (`skills/postfrau/SKILL.md`) teaches Claude Code to drive it. MCP is not required; a `postfrau mcp` stdio adapter over the same `Commands` layer is a §9 option | Agents get the whole engine (resolver, executor, history) with zero duplication and no dependency on the app running; skills work in environments where MCP is not allowed |
 | Scripts (pre-request/tests) | Out of v1. When added, use **JavaScriptCore** (ships with macOS), never Node | Honors the no-Node constraint |
 | GraphQL / WebSocket | Out of v1; extension points reserved (see §9) | User explicitly wants GraphQL later |
 
@@ -39,12 +45,13 @@ git commit. Tick the checkboxes in this file as you go so progress survives cont
 3. Collections with nested folders; create/rename/duplicate/move/delete; drag-and-drop reorder; collection- and folder-level auth and variables (inherited).
 4. Tabs for open requests with dirty state, unsaved-changes prompt, restore on relaunch.
 5. Environments + globals; `{{variable}}` substitution everywhere; secret variables stored in Keychain; unresolved variables visibly flagged; dynamic variables (`{{$guid}}`, `{{$timestamp}}`, `{{$isoTimestamp}}`, `{{$randomInt}}`).
-6. History (auto-recorded, searchable, capped, reopenable).
+6. History (auto-recorded, searchable, capped, reopenable) with a **recording level** setting — off / metadata / headers / full bodies — redaction of secrets, and **attribution** (app, CLI, or a named agent).
 7. Import/export: Postman Collection v2.1, Postman Environment JSON, cURL (paste to import, copy as cURL).
 8. Quick open (⌘K) fuzzy finder over all requests.
 9. Settings window; keyboard-first workflow; full menu bar.
 10. Handles big data gracefully: 5 000-request collections, 50 MB responses.
 11. Sync across Macs by choosing a data folder inside iCloud Drive / Google Drive / Dropbox (Settings ▸ Data), with external-change detection and conflict copies. Secrets sync via iCloud Keychain, opt-in.
+12. `postfrau` command-line tool: list/inspect/add/edit requests and environments, run requests (single, folder, dry-run, capture values into an environment), ad-hoc send, read history, print the JSON schema — every command with `--json`. Ships inside the app bundle with an "Install command line tool" action, plus a skill file for Claude Code.
 
 ### Out of scope (v1)
 Collaboration, sync, accounts, workspaces, mock servers, monitors, load tests, scripting, GraphQL,
@@ -71,13 +78,16 @@ postfrau/
 │       │   ├── Model/          RequestCollection, Folder, RequestItem, RequestEnvironment, Variable, Auth, RequestBody, HistoryEntry, JSONValue
 │       │   ├── Resolve/        VariableResolver, VariableScope, DynamicVariables, AuthResolver
 │       │   ├── HTTP/           HTTPExecutor (actor), RequestBuilder, HTTPResponse, Timing, SessionDelegate
-│       │   ├── Persistence/    WorkspaceStore (actor), DataFolder, AtomicFile, CoordinatedFile, FolderWatcher, ConflictResolver, HistoryLog, Keychain, Migrations
+│       │   ├── Commands/       Command structs + CommandRunner: SendRequest, RunFolder, AddRequest, UpdateRequest, MoveItem, SetVariable… (shared by app, CLI, future MCP)
+│       │   ├── Persistence/    WorkspaceStore (actor), DataFolder, AtomicFile, CoordinatedFile, FolderWatcher, ConflictResolver, HistoryStore (per-entry files; replaces HistoryLog in Phase 8), Keychain, Migrations
 │       │   ├── Interop/        PostmanV21Importer/Exporter, PostmanEnvironment, CurlParser, CurlFormatter
 │       │   ├── Text/           JSONPrettyPrinter, XMLPrettyPrinter, ContentTypeSniffer
 │       │   └── Util/           FuzzyMatcher, ByteCount, Debouncer
+│       ├── Sources/postfrau/           ← CLI executable target (Phase 11): ArgumentParser-free hand-rolled parser, Output (human/json), Commands mapping
 │       └── Tests/PostfrauCoreTests/
 │           ├── Fixtures/       postman-*.json, curl-*.txt
 │           └── *Tests.swift    (Swift Testing, `@Test`)
+├── skills/postfrau/SKILL.md    ← Claude Code skill: CLI reference + workflows (Phase 11); `postfrau skill install` copies it
 ├── Postfrau/                   ← app target
 │   ├── App/                    PostfrauApp.swift, AppDelegate.swift, AppCommands.swift (menus), Shortcuts.swift
 │   ├── State/                  AppState (@Observable, root), TabsState, SelectionState, SendController
@@ -94,7 +104,7 @@ postfrau/
 │   ├── Highlighting/           SyntaxHighlighter protocol, JSONHighlighter, XMLHighlighter, Theme
 │   ├── Resources/              Assets.xcassets, Postfrau.icon (Icon Composer bundle), SampleCollection.json, Postfrau.entitlements, Info.plist
 │   └── Support/                Pasteboard, FileDialogs, KeychainBridge
-├── PostfrauUITests/            ← minimal XCUITest smoke (Phase 11)
+├── PostfrauUITests/            ← minimal XCUITest smoke (Phase 12)
 ├── Scripts/
 │   ├── bootstrap.sh            (brew install xcodegen if missing; xcodegen generate)
 │   ├── screenshot.sh           (launch app, capture main window to /tmp for visual checks)
@@ -152,7 +162,11 @@ struct RequestEnvironment { id, name, variables: [Variable], updatedAt, revision
 struct Globals { variables: [Variable], updatedAt, revision: Int }
 struct Variable { id, key, value: String /* empty on disk if secret */, enabled, isSecret: Bool }
 
-struct HistoryEntry { id, sentAt: Date, method, resolvedURL, statusCode: Int?, durationMs, responseBytes, requestSnapshot: RequestItem, error: String? }
+struct HistoryEntry { id, sentAt: Date, method, resolvedURL, statusCode: Int?, durationMs, responseBytes, requestSnapshot: RequestItem, error: String?,
+                      source: HistorySource /* .app | .cli | .agent(name) */, recordLevel: HistoryRecordLevel /* off|metadata|headers|full */,
+                      requestHeaders: [(String,String)]?, requestBody: RecordedBody?, responseHeaders: [(String,String)]?, responseBody: RecordedBody? }
+struct RecordedBody { data: Data /* capped */, truncated: Bool, originalBytes: Int, mimeType: String? }
+// Redaction before writing: values of secret variables, Authorization / Proxy-Authorization / Cookie / Set-Cookie header values, api-key auth values → "•••".
 
 struct HTTPResponse { statusCode, reasonPhrase, headers: [(String,String)] /* ordered, duplicates allowed */,
                       body: ResponseBody /* .inMemory(Data) | .onDisk(URL, byteCount) */, mimeType, textEncoding,
@@ -188,9 +202,9 @@ DATA FOLDER  (default: ~/Library/Application Support/Postfrau/Data — relocatab
 └── globals.json
 
 LOCAL  (~/Library/Containers/com.postfrau.Postfrau/Data/Library/Application Support/Postfrau/)
-├── settings.json               includes data-folder security-scoped bookmark + last known path
+├── settings.json               includes data-folder security-scoped bookmark + plain `dataFolderPath` (read by the CLI), `historyRecording` level, `historyBodyCapBytes` (default 262144)
 ├── ui-state.json               open tabs (ids + unsaved drafts), selection, sidebar width, window frame, active env
-├── history.jsonl               one HistoryEntry per line; pruned to `maxHistoryEntries` (default 1000) on launch and every 100 writes
+├── history/<yyyy-MM-dd>/<HHmmss.SSS>-<uuid>.json   one file per entry (multi-writer safe: app and CLI append concurrently); pruned to `maxHistoryEntries` (default 1000) on launch and every 100 writes; day folders keep listing cheap
 └── conflicts/                  copies produced by ConflictResolver, surfaced in the UI until dismissed
 ```
 Rules: all writes atomic (write temp in same dir, `rename`) and, inside the data folder, wrapped in
@@ -234,7 +248,7 @@ Deleting a variable or environment deletes its Keychain items.
   behind monospace text. Respect Reduce Transparency automatically (the system does; don't fight it).
 - `NavigationSplitView` with sidebar (min 220, default 260) and detail. Detail is a vertical
   `HSplitView`/`VSplitView` (user can toggle horizontal vs vertical response layout in Settings).
-- Sidebar has two sections in one `List`: Collections (outline, expandable) and History (grouped by day).
+- Sidebar has two sections in one `List`: Collections (outline, expandable) and History (grouped by day; entries from the CLI or an agent carry a small source badge and can be filtered).
   A segmented control at the top switches between them if the list gets long; filter field filters both.
 - Tab bar is custom SwiftUI (no `TabView`): scrollable, middle-click/⌘W closes, unsaved dot, drag to reorder,
   double-click empty area = new request. Tabs persist across relaunch.
@@ -304,6 +318,7 @@ update checkboxes here → `git commit -m "Phase N: …"`. Never start phase N+1
 - [x] `Keychain` wrapper (Security framework): get/set/delete generic password; tests run against a
       test service name and clean up after themselves (skip gracefully if Keychain is unavailable in CI).
 - [x] `HistoryLog`: append(entry), load(limit:), clear(), prune(to:). JSONL, tolerant of a corrupt last line.
+      *(R3: superseded by `HistoryStore` in Phase 8 — JSONL is not safe for two writers once bodies are recorded.)*
 - [x] `VariableResolver` per §3 with `ResolveResult { text, unresolved: [String], cycles: [String] }`.
       Dynamic variables. Tests: precedence, nesting, cycles, unresolved, `{{ spaced }}` trimmed keys,
       escaped `\{{` left alone.
@@ -344,6 +359,10 @@ update checkboxes here → `git commit -m "Phase N: …"`. Never start phase N+1
 - [ ] URL bar (plain `TextField` for now), method picker, Send/Cancel, progress bar.
 - [ ] `SendController`: takes current tab's draft, resolves variables (active env + chain + globals),
       calls executor, stores `HTTPResponse` on the tab, appends history entry.
+- [ ] *(R3)* Put the send pipeline in Core as `Commands/SendRequest` (input: request + scope + settings + record level +
+      source; output: `HTTPResponse` + the `HistoryEntry` it produced). `SendController` is a thin main-actor wrapper
+      that adds cancellation and tab state. The CLI (Phase 11) calls the same command. If Phase 3 is already past
+      this point, do the extraction at the start of Phase 11 instead — don't rework finished UI now.
 - [ ] Response pane: status/time/size line, raw body in a `CodeTextView` (NSTextView wrapper, non-editable,
       monospaced, no highlighting yet), headers list.
 - [ ] Environment picker in toolbar (switching only; management UI is Phase 7).
@@ -415,11 +434,23 @@ update checkboxes here → `git commit -m "Phase N: …"`. Never start phase N+1
   is sent correctly; relaunch keeps secrets (Keychain), JSON on disk has empty value.
 
 ### Phase 8 — History  ☐
-- [ ] Sidebar History section grouped by day, showing method, status color, URL path, relative time.
-- [ ] Click opens a tab with the snapshot (unsaved, titled "History · GET /users"); "Save to collection…" action.
-- [ ] Search/filter; clear all; delete single entry; cap configurable in Settings (default 1000).
+- [ ] `HistoryStore` (replaces `HistoryLog`): one JSON file per entry under `history/<day>/`, append = write one
+      file, load = list newest-first with a limit, prune, delete, clear. Safe for the app and the CLI writing at the
+      same time (no shared file is ever rewritten). One-time migration of an existing `history.jsonl`.
+- [ ] Recording levels (`HistoryRecordLevel`): **off** (nothing written), **metadata** (default: method, URL, status,
+      timing, size, request snapshot without body), **headers** (+ request/response headers), **full** (+ bodies capped
+      at `historyBodyCapBytes`, `truncated` flag). Redaction per §3 applied before write, always. Level lives in
+      Settings ▸ History; per-collection override (`historyRecording` on the collection, nil = inherit) for APIs you never want logged.
+- [ ] Attribution: `source` on every entry — `.app`, `.cli`, `.agent(name)` (CLI reads `POSTFRAU_AGENT` / `--as`).
+- [ ] Sidebar History section grouped by day: method, status color, URL path, relative time, source badge for
+      non-app entries; filter by text and by source; "Agents only" toggle.
+- [ ] Click opens a tab with the snapshot (unsaved, titled "History · GET /users"); when headers/bodies were recorded
+      the response pane shows them read-only with a "recorded" banner. "Save to collection…" action.
+- [ ] Clear all; delete single entry; cap configurable in Settings (default 1000).
 - [ ] History records failed sends too (with the error).
-- Acceptance: 1 000 entries load in < 200 ms at launch; filter is instant.
+- Acceptance: 1 000 entries load in < 200 ms at launch; filter is instant; switching to **full** records a body and
+  the file on disk has the bearer token replaced by •••; two processes appending simultaneously lose nothing
+  (test with a second `Process`).
 
 ### Phase 9 — Sync via data folder  ☐
 Goal: pointing the data folder at `iCloud Drive/Postfrau` (or Google Drive, Dropbox, a git checkout) makes two Macs share collections and environments, without Postfrau ever running a server.
@@ -476,10 +507,51 @@ Goal: pointing the data folder at `iCloud Drive/Postfrau` (or Google Drive, Drop
   request from it successfully; export → re-import yields an identical model (test asserts equality
   modulo ids/timestamps).
 
-### Phase 11 — Polish & release  ☐
+### Phase 11 — CLI & agent interface  ☐
+Goal: an agent with only Bash and `skills/postfrau/SKILL.md` can inspect and edit collections, run requests, and read history, without the app running, and everything it does shows up in the app with attribution.
+- [ ] `Commands` layer in Core (extract from app if Phase 3 didn't already): `SendRequest`, `RunFolder` (sequential, stops-on-error flag),
+      `ListItems`, `GetRequest`, `AddRequest`, `UpdateRequest` (partial: url/method/headers/params/body/auth), `MoveItem`, `RemoveItem`,
+      `DuplicateItem`, `ListEnvironments`, `SetVariable`, `UnsetVariable`, `UseEnvironment`, `ListHistory`, `ImportCurl`, `ExportCurl`.
+      Each is a `Sendable` struct with a typed result; `CommandRunner` owns a `WorkspaceStore`, `HTTPExecutor`, `HistoryStore`, `Keychain`.
+      Items are addressed by **path** (`Acme API/Users/list`, case-insensitive, `/` escaped as `\/`) or by UUID.
+- [ ] `postfrau` executable target in `Packages/PostfrauCore/Sources/postfrau` (no ArgumentParser dependency; a small
+      hand-rolled parser is fine — see §0 "no third-party deps"). Global flags: `--json`, `--data-dir`, `--env`, `--as <agent>`,
+      `--record off|metadata|headers|full`, `--reveal` (secrets are `•••` in all output otherwise), `--quiet`. Exit codes:
+      0 ok, 1 usage, 2 not found, 3 network/transport error, 4 HTTP status ≥ 400 with `--fail`, 5 data folder unavailable.
+- [ ] Data folder discovery order: `--data-dir` → `POSTFRAU_DATA_DIR` → `dataFolderPath` in the app's `settings.json`
+      inside the sandbox container → default folder. Local state root: `POSTFRAU_LOCAL_ROOT` → the container path.
+- [ ] Commands: `ls [path] [--tree]`, `get <path>`, `add <folder-path> --name … (--from-curl '…' | --file req.json | --stdin | --url … --method …)`,
+      `set <path> [--url] [--method] [--header k:v]… [--param k=v]… [--body @file|-] [--auth none|basic:u:p|bearer:t|apikey:k:v[:query]]`,
+      `mv <path> <folder-path>`, `rm <path> [--yes]`, `dup <path>`,
+      `run <path> [--all] [--var k=v]… [--max-body 64k] [--out file] [--dry-run] [--fail] [--capture name=$.json.path]…`,
+      `send <METHOD> <url> [-H k:v]… [-d body|@file] [--save-to <folder-path> --name …]`,
+      `env ls | env get <name> | env set <name> k=v [--secret] | env unset <name> k | env use <name>|none`,
+      `history [--last N] [--agent x] [--since 2h] [--status 5xx]`, `history show <id>`,
+      `import <file>` / `export <collection> [--out file]` (reuse Phase 10), `schema [collection|environment|history]`,
+      `validate <file>`, `open <path>` (via `postfrau://` URL scheme registered by the app), `skill install [--to dir]`, `version`.
+- [ ] `--dry-run` prints the fully built request (method, final URL, headers, body preview) and writes no history.
+      `--capture name=$.path` evaluates a minimal JSONPath subset (`$.a.b[0].c`) on the response and stores it in the active environment (not as a secret unless `--secret`).
+- [ ] Human output: aligned tables, colored method/status when stdout is a TTY. `--json` output is stable and documented in `SKILL.md`;
+      `run` with `--all` emits NDJSON, one object per request.
+- [ ] App side: register `postfrau://` URL scheme; Settings ▸ Advanced "Install command line tool" symlinks
+      `Postfrau.app/Contents/MacOS/postfrau` into `/usr/local/bin` (ask for the folder via `NSOpenPanel` if not writable;
+      never escalate privileges); `make install` for developers. The CLI is copied into the bundle by a build phase.
+- [ ] Keychain from a second binary: document the one-time "Always allow" prompt; fall back to `POSTFRAU_SECRET_<KEY>`
+      env vars when the item is unreadable; never print secret values without `--reveal`.
+- [ ] `skills/postfrau/SKILL.md`: frontmatter (name, description with trigger words: "postfrau", "run request", "API collection"),
+      the command reference, the `--json` shapes, exit codes, and three worked workflows: explore an API and save requests
+      into a collection; run a request and inspect the response; log in with `--capture` and call an authenticated endpoint.
+      Keep it under 300 lines; link to `postfrau schema` for the file format instead of pasting it.
+- [ ] Tests: command layer unit tests with temp data folders; CLI end-to-end tests that spawn the built binary
+      (`swift build` product) against a temp folder and a `URLProtocol`-free local listener; `schema` output validates the fixtures.
+- Acceptance: with the app closed, `postfrau add … --from-curl`, `postfrau run … --json`, `postfrau history --agent claude` work
+  and survive a second concurrent `run`; launch the app and the new request and the history entry are there with the agent badge;
+  a fresh Claude Code session in a scratch directory with only the installed skill completes all three `SKILL.md` workflows without help.
+
+### Phase 12 — Polish & release  ☐
 - [ ] Full menu bar (File/Edit/View/Request/Window/Help) with every shortcut from §5; Help ▸ Keyboard Shortcuts sheet.
 - [ ] Settings window: General (font size, response layout, default timeout, default verify TLS, max history),
-      Data (the Phase 9 pane), Advanced ("Reset sample collection", "Open local state folder").
+      Data (the Phase 9 pane), History (recording level, body cap, "Clear history"), Advanced ("Install command line tool", "Reset sample collection", "Open local state folder").
 - [ ] Window/state restoration, multiple windows not required (single window app; ⌘N when window is closed reopens it).
 - [ ] Final app icon as an Icon Composer `.icon` bundle (layered glass, light/dark/clear/tinted variants), About window with version + license.
 - [ ] Accessibility pass: labels on everything; VoiceOver can operate URL bar, Send, tabs; check Reduce Transparency and Increase Contrast renderings.
@@ -489,7 +561,7 @@ Goal: pointing the data folder at `iCloud Drive/Postfrau` (or Google Drive, Drop
       `NWListener` HTTP responder inside the UI-test host or use `URLProtocol` via launch argument), send, assert status label.
 - [ ] `Scripts/release.sh`: `xcodebuild archive`, export with Developer ID if `CODESIGN_IDENTITY` env set, else ad-hoc;
       `hdiutil` DMG; optional `notarytool` step guarded by env vars. Version from `MARKETING_VERSION` in project.yml.
-- [ ] README: screenshots (from `Scripts/screenshot.sh`), features, build, roadmap link to §9.
+- [ ] README: screenshots (from `Scripts/screenshot.sh`), features, build, CLI quick start, skill install, roadmap link to §9.
 - Acceptance: DMG builds; fresh user account (or wiped container: `rm -rf ~/Library/Containers/com.postfrau.Postfrau`)
   launches with sample collection on macOS 26; entire §5 shortcut list works.
 
@@ -512,6 +584,7 @@ Goal: pointing the data folder at `iCloud Drive/Postfrau` (or Google Drive, Drop
 11. **Warnings are errors** in the app target (`SWIFT_TREAT_WARNINGS_AS_ERRORS=YES`) once Phase 3 compiles clean; keep it that way.
 12. **Keep the UI keyboard-first and un-cluttered.** When in doubt, mirror Postman's layout (users know it) but with native macOS controls and spacing.
 13. **macOS 26 only, and act like it.** No `if #available` ladders, no AppKit workarounds for things SwiftUI on 26 does natively. Use the glass API through system components first; hand-placed `.glassEffect()` needs a reason.
+14. **Every capability goes through `Commands`.** If the app can do it and an agent might want it, it is a Core command first and a view second. The CLI must never grow logic the app doesn't share.
 
 ## 8. Risks & mitigations
 
@@ -525,6 +598,9 @@ Goal: pointing the data folder at `iCloud Drive/Postfrau` (or Google Drive, Drop
 | Postman format edge cases | Preserve unknown JSON as `extras`; surface warnings instead of failing the import |
 | Big responses blow memory | Spill > 20 MB to temp file; viewer shows a window into the file; hard cap 200 MB |
 | Sync client delivers half-written or duplicated files (Dropbox "conflicted copy", iCloud placeholders, Google Drive renames) | Own-write fingerprinting, coordinated atomic writes, conflict copies instead of merges, ignore files that don't match `<uuid>.json` |
+| Keychain items written by the sandboxed app are not readable by the CLI without a prompt | One-time "Always allow"; env-var fallback; never a hard failure — the request is sent with the variable unresolved and a warning |
+| An agent runs destructive requests by mistake | `--dry-run` is documented first in `SKILL.md`; `rm` needs `--yes`; history attribution makes every agent action auditable |
+| Two processes write history at once | One file per entry, never rewritten; prune only deletes files older than the cap |
 | Sandbox loses access to the data folder (bookmark stale after the folder is moved) | `DataFolder.status` + banner with *Choose Folder…*; fall back to default folder read-only until resolved |
 | Precision loss pretty-printing JSON numbers | Tokenizer-based pretty printer; never round-trip through `JSONSerialization`/`Double` |
 | Liquid Glass over-applied → unreadable dense UI, or stale API names from pre-release docs | Glass on chrome only (§5); verify every SwiftUI 26 API against the local Xcode 26.6 SDK headers / docs before use; `docs/decisions.md` records any API that had to be swapped |
@@ -542,6 +618,8 @@ Goal: pointing the data folder at `iCloud Drive/Postfrau` (or Google Drive, Drop
 - **Code generation:** `CurlFormatter` generalizes to a `SnippetGenerator` protocol (Swift/URLSession, Python/requests, JS/fetch…).
 - **OpenAPI import:** new `Interop/OpenAPIImporter` producing a `Collection`.
 - **Cookie jar UI:** expose the per-profile `HTTPCookieStorage`.
+- **MCP server:** `postfrau mcp` — stdio JSON-RPC over the same `Commands` layer, one tool per command; only if an environment allows MCP. No new logic.
+- **App Intents:** expose `SendRequest` and `RunFolder` to Shortcuts/Spotlight; same command layer.
 - **Native iCloud container:** if a paid Apple Developer Program membership becomes available, add the iCloud Documents
   entitlement and offer "Postfrau in iCloud" as a one-click data location (`url(forUbiquityContainerIdentifier:)`);
   `DataFolder` already abstracts the root, so this is a new provider, not a redesign. CloudKit is deliberately not planned: JSON files + Keychain cover the need.
@@ -549,6 +627,6 @@ Goal: pointing the data folder at `iCloud Drive/Postfrau` (or Google Drive, Drop
 
 ## 10. Definition of done for v1
 
-- All Phase 0–11 boxes ticked; `make test` green; `Scripts/release.sh` produces a DMG that runs on a clean macOS 26 machine.
+- All Phase 0–12 boxes ticked; `make test` green; `Scripts/release.sh` produces a DMG that runs on a clean macOS 26 machine.
 - A user coming from Postman can import their collection and environment, switch environment, send
   requests with auth and bodies, read responses comfortably, and never sees a beachball.
