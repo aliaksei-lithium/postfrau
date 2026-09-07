@@ -102,3 +102,65 @@ delegate and on `URLRequest` — so including them would multiply the session ca
 The profile is `(verifyTLS, sendCookies)`, which is exactly the set that cannot vary per request.
 Each profile gets its own `HTTPCookieStorage` so a request that opted out of cookies never sees
 another profile's session cookie.
+
+## D11 — `Commands/SendRequest` extraction deferred to Phase 11
+
+**Phase 3 (plan revision R3).** R3 added an item to Phase 3: put the send pipeline in Core as
+`Commands/SendRequest` so the CLI can reuse it. The revision arrived while Phase 3's UI was already
+built and working, and the item itself says: *"If Phase 3 is already past this point, do the
+extraction at the start of Phase 11 instead — don't rework finished UI now."* That is what is
+happening. `SendController` currently holds the pipeline (resolve scope → build → execute → record
+history); Phase 11 lifts that body into `Commands/SendRequest` and leaves `SendController` as the
+thin main-actor wrapper adding cancellation and tab state, per §7 rule 14.
+
+## D12 — Launch overrides for the local state root, and why there are three of them
+
+**Phase 3.** Deterministic UI tests need each run to start from an empty state directory. Three
+mechanisms exist because each is the only one that works in its situation:
+
+- `POSTFRAU_LOCAL_ROOT` (environment) — works from a shell; Phase 9 uses it for a second instance.
+  **Does not work from XCUITest**: `XCUIApplication.launchEnvironment` never reaches an app started
+  through LaunchServices. Verified by observation — the directory was never created.
+- `--local-root <absolute path>` (launch argument) — arguments *do* reach the app (verified by
+  printing `ProcessInfo.arguments` into the accessibility tree).
+- `--local-root-name <name>` — the XCUITest runner is itself sandboxed into
+  `com.postfrau.PostfrauUITests.xctrunner`, so `homeDirectoryForCurrentUser` there resolves to the
+  *runner's* container and any path it invents is one the app is forbidden to write. The runner
+  passes a folder *name* and the app places it inside its own container.
+
+`--reset-state` empties the resolved folder first. `--appearance dark|light` forces one appearance
+for the process, so both renderings can be reviewed without touching the machine's system setting
+(the usual `-AppleInterfaceStyle` argument-domain trick does not reach a LaunchServices-started app
+either).
+
+## D13 — Accessibility defects found by driving the real UI
+
+**Phase 3.** Writing the acceptance criteria as XCUITests rather than checking them by eye surfaced
+four defects that a screenshot would never have shown, all of which also broke VoiceOver:
+
+1. `.onTapGesture` on the tab bar's container collapsed **every tab into one accessibility
+   element** whose label was the concatenation of all tab titles. The gesture moved into
+   `.background { }`.
+2. `.accessibilityLabel` on an `NSViewRepresentable` does not reach the wrapped view, so the
+   response body `NSTextView` was unnamed. `CodeTextView` now takes a label and calls
+   `setAccessibilityLabel` / `setAccessibilityRole` on the text view itself.
+3. Sidebar request rows exposed nothing at all: a label on a bare `HStack` needs
+   `.accessibilityElement(children: .ignore)` to become an element.
+4. Two different segmented controls were both titled "View", so a query for the response's Headers
+   tab could land on the request editor's.
+
+## D14 — `applicationShouldTerminate` flush; `XCUIApplication.terminate()` bypasses it
+
+**Phase 3.** Autosave is debounced by 300 ms, so quitting immediately after an edit dropped it.
+`AppDelegate.applicationShouldTerminate` now returns `.terminateLater`, flushes, and replies, with
+a 3 s watchdog so a stuck write cannot wedge the quit. The relaunch test originally used
+`XCUIApplication.terminate()`, which kills the process outright — `applicationShouldTerminate` was
+never called (verified with a marker file). The test quits with ⌘Q instead, which is both the real
+quit path and what a user does.
+
+## D15 — First-run sample install must follow UI-state restore
+
+**Phase 3.** `installSampleCollection` expands the new collection, but `restore(uiState)` assigns
+the expansion set wholesale, so installing first meant the sample always appeared collapsed on
+first run. The order in `AppState.load` is now: load workspace → restore UI state → install the
+sample if there are no collections.

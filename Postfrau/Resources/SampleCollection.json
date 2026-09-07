@@ -1,0 +1,276 @@
+{
+  "auth": {
+    "type": "none"
+  },
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "description": "A few requests against httpbin.org so you have something to send on day one. Edit or delete this collection freely.",
+  "id": "deb2479b-bc06-47cc-83d8-0c97888a98b4",
+  "items": [
+    {
+      "request": {
+        "auth": {
+          "type": "inherit"
+        },
+        "body": {
+          "type": "none"
+        },
+        "description": "A plain GET. httpbin echoes the query back.",
+        "headers": [],
+        "id": "bb526f9a-4fd2-4f5c-9db8-eab0b075287e",
+        "method": "GET",
+        "name": "Echo query",
+        "params": [
+          {
+            "enabled": true,
+            "id": "b949dcf7-3d5c-4c81-9b79-d3cae9eecdbc",
+            "key": "limit",
+            "value": "10"
+          },
+          {
+            "enabled": true,
+            "id": "6d301b52-6ac3-407d-a7ad-89a17c525033",
+            "key": "q",
+            "value": "postfrau"
+          }
+        ],
+        "settings": {
+          "encodeURL": true,
+          "followRedirects": true,
+          "maxRedirects": 10,
+          "sendCookies": true,
+          "timeoutSeconds": 30,
+          "verifyTLS": true
+        },
+        "url": "{{baseUrl}}/get"
+      },
+      "type": "request"
+    },
+    {
+      "folder": {
+        "auth": {
+          "type": "inherit"
+        },
+        "description": "Different request body modes.",
+        "id": "2ed11452-3eb7-440a-a6a1-85406dbeb3c6",
+        "items": [
+          {
+            "request": {
+              "auth": {
+                "type": "inherit"
+              },
+              "body": {
+                "language": "json",
+                "text": "{\n  \"name\": \"Ada\",\n  \"role\": \"engineer\"\n}",
+                "type": "raw"
+              },
+              "description": "Posts a JSON body; the response echoes it back under \"json\".",
+              "headers": [
+                {
+                  "enabled": true,
+                  "id": "22ff0b57-fa86-4e4d-9aba-f6814869b160",
+                  "key": "X-Example",
+                  "value": "1"
+                }
+              ],
+              "id": "2d7cbf77-5048-4efb-aecd-d456987f30c7",
+              "method": "POST",
+              "name": "POST JSON",
+              "params": [],
+              "settings": {
+                "encodeURL": true,
+                "followRedirects": true,
+                "maxRedirects": 10,
+                "sendCookies": true,
+                "timeoutSeconds": 30,
+                "verifyTLS": true
+              },
+              "url": "{{baseUrl}}/anything"
+            },
+            "type": "request"
+          },
+          {
+            "request": {
+              "auth": {
+                "type": "inherit"
+              },
+              "body": {
+                "type": "urlEncoded",
+                "urlEncoded": [
+                  {
+                    "enabled": true,
+                    "id": "6b4d73ed-da32-42b3-8e42-c85f6d2f0b66",
+                    "key": "name",
+                    "value": "Ada"
+                  },
+                  {
+                    "enabled": true,
+                    "id": "8ca87054-6225-4d1c-8ef8-45043b1a8a55",
+                    "key": "role",
+                    "value": "engineer"
+                  }
+                ]
+              },
+              "description": "A urlencoded form body.",
+              "headers": [],
+              "id": "66a06b62-f090-4ce4-8080-4f9c980a6342",
+              "method": "POST",
+              "name": "POST form",
+              "params": [],
+              "settings": {
+                "encodeURL": true,
+                "followRedirects": true,
+                "maxRedirects": 10,
+                "sendCookies": true,
+                "timeoutSeconds": 30,
+                "verifyTLS": true
+              },
+              "url": "{{baseUrl}}/post"
+            },
+            "type": "request"
+          }
+        ],
+        "name": "Bodies",
+        "variables": []
+      },
+      "type": "folder"
+    },
+    {
+      "folder": {
+        "auth": {
+          "type": "inherit"
+        },
+        "description": "Things to look at in the response pane.",
+        "id": "6a20cfa5-516b-45d5-9628-6e5e432ab1e1",
+        "items": [
+          {
+            "request": {
+              "auth": {
+                "type": "inherit"
+              },
+              "body": {
+                "type": "none"
+              },
+              "description": "Any status you ask for -- good for checking the status pill.",
+              "headers": [],
+              "id": "42583703-a230-472f-a4b6-ee22cd00fd06",
+              "method": "GET",
+              "name": "Status 404",
+              "params": [],
+              "settings": {
+                "encodeURL": true,
+                "followRedirects": true,
+                "maxRedirects": 10,
+                "sendCookies": true,
+                "timeoutSeconds": 30,
+                "verifyTLS": true
+              },
+              "url": "{{baseUrl}}/status/404"
+            },
+            "type": "request"
+          },
+          {
+            "request": {
+              "auth": {
+                "type": "inherit"
+              },
+              "body": {
+                "type": "none"
+              },
+              "description": "Three hops; the response header shows the redirect count.",
+              "headers": [],
+              "id": "0ad06d35-0be8-4f88-b035-8d3356173fea",
+              "method": "GET",
+              "name": "Redirect chain",
+              "params": [],
+              "settings": {
+                "encodeURL": true,
+                "followRedirects": true,
+                "maxRedirects": 10,
+                "sendCookies": true,
+                "timeoutSeconds": 30,
+                "verifyTLS": true
+              },
+              "url": "{{baseUrl}}/redirect/3"
+            },
+            "type": "request"
+          },
+          {
+            "request": {
+              "auth": {
+                "type": "inherit"
+              },
+              "body": {
+                "type": "none"
+              },
+              "description": "Ten seconds. Press Esc while it runs to test cancellation.",
+              "headers": [],
+              "id": "641dda58-75d9-4473-b11d-b16ad1c6b427",
+              "method": "GET",
+              "name": "Slow response",
+              "params": [],
+              "settings": {
+                "encodeURL": true,
+                "followRedirects": true,
+                "maxRedirects": 10,
+                "sendCookies": true,
+                "timeoutSeconds": 30,
+                "verifyTLS": true
+              },
+              "url": "{{baseUrl}}/delay/10"
+            },
+            "type": "request"
+          },
+          {
+            "request": {
+              "auth": {
+                "type": "inherit"
+              },
+              "body": {
+                "type": "none"
+              },
+              "description": "Look at the Cookies tab afterwards.",
+              "headers": [],
+              "id": "db99b656-aa3a-4b50-8a10-96e47108fdcf",
+              "method": "GET",
+              "name": "Set a cookie",
+              "params": [
+                {
+                  "enabled": true,
+                  "id": "37265eca-3370-4730-b492-b6fa6c4458f8",
+                  "key": "flavour",
+                  "value": "chocolate"
+                }
+              ],
+              "settings": {
+                "encodeURL": true,
+                "followRedirects": true,
+                "maxRedirects": 10,
+                "sendCookies": true,
+                "timeoutSeconds": 30,
+                "verifyTLS": true
+              },
+              "url": "{{baseUrl}}/cookies/set"
+            },
+            "type": "request"
+          }
+        ],
+        "name": "Responses",
+        "variables": []
+      },
+      "type": "folder"
+    }
+  ],
+  "name": "Postfrau Examples",
+  "revision": 1,
+  "schemaVersion": 1,
+  "updatedAt": "2026-01-01T00:00:00.000Z",
+  "variables": [
+    {
+      "description": "Change this to point at your own API.",
+      "enabled": true,
+      "id": "0c13e8d7-de9e-4da4-8841-f0d9ddbc593e",
+      "key": "baseUrl",
+      "value": "https://httpbin.org"
+    }
+  ]
+}

@@ -1,47 +1,56 @@
 # Postfrau — status
 
-**Current phase:** 3 (App shell & first end-to-end send) — starting
-**Last completed:** Phase 2 — HTTP executor
-**Build:** green — `make test` passes (193 Core tests in 5.3 s, plus app unit + UI smoke tests)
+**Current phase:** 4 (Request editor complete) — next
+**Last completed:** Phase 3 — App shell & first end-to-end send
+**Build:** green — `make test` passes: 193 Core tests (5.3 s), app unit tests, and 5 XCUITests that
+drive the real UI.
+
+> **Plan revision R3** (`PLAN.md`, 2026-09-07) added a `postfrau` CLI + Claude Code skill as
+> **Phase 11**, rewrote **Phase 8** (per-entry history files, recording levels, attribution), and
+> renumbered Polish & release to **Phase 12**. R3 also asked for the send pipeline to move into a
+> Core `Commands` layer during Phase 3; that phase was already built when the revision landed, so —
+> following the item's own instruction — the extraction happens at the start of Phase 11
+> (`docs/decisions.md` D11).
 
 ## What works
 
-Core is feature-complete for sending:
+**The app sends requests end to end.** Launch → pick a request from the sample collection → ⌘↩ →
+status, timing, size, pretty-ish body, headers and cookies. Cancel works mid-flight, tabs and
+window state come back after a relaunch.
 
-- **Model & persistence** (Phase 1): full domain model, `WorkspaceStore` with atomic +
-  file-coordinated writes and own-write fingerprints, `Keychain`, `HistoryLog`, `Migrations`.
-- **Resolvers** (Phase 1): `VariableResolver` (precedence, recursion, cycles, escapes, dynamics,
-  URL-bar tokens) and `AuthResolver` (inherit chain + wire values).
-- **`RequestBuilder`**: variable resolution, params-own-the-query composition with an
-  `encodeURL` switch, auth application (header or query), default headers the user can override,
-  and every body mode — raw with per-language `Content-Type`, urlencoded with form escaping,
-  multipart (in memory when text-only, streamed from a temp file as soon as a part is a file),
-  and binary streamed from a security-scoped bookmark.
-- **`HTTPExecutor`** actor: per-profile `URLSession`s with their own cookie jars, TLS override,
-  redirect recording and limits, `URLSessionTaskMetrics` → `Timing`, bodies streamed to disk with
-  a 20 MB spill threshold and a 200 MB cap enforced mid-transfer, and real task cancellation.
-- Cookie parsing, reason phrases, byte/duration formatting.
-
-Verified live: `GET https://example.com` → `200 OK  559 B  125 ms`, with a full DNS / Connect /
-TLS / Request / Waiting / Download breakdown. Opt-in live tests run with `POSTFRAU_LIVE_TESTS=1`.
+- **Core** (Phases 1–2): full domain model, `WorkspaceStore` (atomic + file-coordinated writes,
+  revisions, own-write fingerprints), `VariableResolver`, `AuthResolver`, `Keychain`, `HistoryLog`,
+  `RequestBuilder` (every body mode), `HTTPExecutor` (per-profile sessions, TLS override, redirect
+  recording, metrics → timing, disk-streamed bodies, real cancellation).
+- **App**: `AppState` with debounced autosave driven by the macOS 26 `Observations` sequence;
+  `NavigationSplitView` shell with a persisted, draggable split; sidebar outline + history list;
+  custom tab bar (dirty dot, close, drag to reorder, ⌘T/⌘W/⌘⇧[/]); URL bar, method picker,
+  Send/Cancel with a progress bar; response pane with status pill, timing, size, body in an
+  `NSTextView`, headers and cookies tables; toolbar environment picker with a resolved-variable
+  quick-look; status bar; menu bar with the Phase 3 shortcuts; first-run sample collection.
+- **Verification**: the Phase 3 acceptance criteria are XCUITests, not eyeballing — launch,
+  open-from-sidebar-and-send, cancel a 10 s request, and restore tabs across a ⌘Q. A separate
+  `ScreenshotTests` captures the window in light and dark.
 
 ## Next
 
-Phase 3: `AppState`, the three-pane layout, tab bar, URL bar, `SendController`, the response pane
-with a `CodeTextView` (NSTextView), the toolbar environment picker, and a first-run sample
-collection — i.e. the first end-to-end send from the UI.
+Phase 4: `KeyValueEditor`, params ↔ URL two-way sync, headers with autocomplete and an
+"auto headers" section, the full Auth tab, all body modes, the `TokenTextField` URL bar with
+`{{variable}}` colouring, dirty-tab save prompts, and inline rename.
 
 ## Known issues / limitations
 
-- The app UI is still the Phase 0 placeholder; nothing is wired to Core yet.
-- App icon is a placeholder mark; the real one lands in Phase 11.
-- Hardened runtime is off in the generated project and enabled only by `Scripts/release.sh`
-  (`docs/decisions.md` D3).
+- Params / Headers / Auth tabs are read-only placeholders until Phase 4; the raw JSON body editor
+  works. The response body is not syntax-highlighted or pretty-printed yet (Phase 5).
+- Sidebar is read-only — no create/rename/delete/drag (Phase 6).
+- `URLSession` leaves occasional `CFNetworkDownload_*.tmp` files in the container's tmp when a
+  download is cancelled. Postfrau's own spill files are cleaned up; these are the framework's.
+- App icon is a placeholder mark (Phase 12). Hardened runtime is off in the generated project and
+  enabled only by `Scripts/release.sh` (`docs/decisions.md` D3).
 
 ## Decisions taken
 
-`docs/decisions.md`: D1 hand-written `.icon` bundle · D2 `SWIFT_VERSION` spelling · D3 hardened
-runtime placement · D4 UI-test actor isolation · D5 model type renames · D6 CryptoKit in Core ·
-D7 fractional-second timestamps · D8 `Keychain.deleteAll` loops `SecItemDelete` ·
-D9 `download(for:)` instead of `bytes(for:)` (measured 40x faster on large bodies) ·
-D10 session profiles key on TLS and cookies only.
+`docs/decisions.md` D1–D15. Most consequential: D5 model type renames · D9 `download(for:)` instead
+of `bytes(for:)` (measured ~40x faster on large bodies) · D11 `Commands` extraction deferred to
+Phase 11 · D12 the three launch overrides and why each is needed · D13 four accessibility defects
+that only driving the real UI could find · D14 quit-time flush.

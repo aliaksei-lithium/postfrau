@@ -349,26 +349,31 @@ update checkboxes here → `git commit -m "Phase N: …"`. Never start phase N+1
 - Acceptance: `swift test` green; executing a GET to `https://example.com` from a throwaway CLI test prints
   200 + timing (verify manually once).
 
-### Phase 3 — App shell & first end-to-end send  ☐
-- [ ] `AppState` (`@Observable`, main-actor by default): owns `Workspace`, `WorkspaceStore`, `HistoryLog`, tabs,
+### Phase 3 — App shell & first end-to-end send  ☑
+- [x] `AppState` (`@Observable`, main-actor by default): owns `Workspace`, `WorkspaceStore`, `HistoryLog`, tabs,
       selection, settings; every mutation goes through methods that schedule a debounced save. Implement the
       debounce with the macOS 26 `Observations { }` async sequence over the dirty set rather than ad-hoc timers.
-- [ ] Three-pane layout per §5 with `NavigationSplitView` + split for request/response; divider persisted.
-- [ ] Sidebar: collections outline (read-only for now, from loaded data), select → opens tab.
-- [ ] Tab bar with open/close/dirty/reorder; state persisted in `ui-state.json`.
-- [ ] URL bar (plain `TextField` for now), method picker, Send/Cancel, progress bar.
-- [ ] `SendController`: takes current tab's draft, resolves variables (active env + chain + globals),
+- [x] Three-pane layout per §5 with `NavigationSplitView` + split for request/response; divider persisted.
+- [x] Sidebar: collections outline (read-only for now, from loaded data), select → opens tab.
+- [x] Tab bar with open/close/dirty/reorder; state persisted in `ui-state.json`.
+- [x] URL bar (plain `TextField` for now), method picker, Send/Cancel, progress bar.
+- [x] `SendController`: takes current tab's draft, resolves variables (active env + chain + globals),
       calls executor, stores `HTTPResponse` on the tab, appends history entry.
 - [ ] *(R3)* Put the send pipeline in Core as `Commands/SendRequest` (input: request + scope + settings + record level +
       source; output: `HTTPResponse` + the `HistoryEntry` it produced). `SendController` is a thin main-actor wrapper
       that adds cancellation and tab state. The CLI (Phase 11) calls the same command. If Phase 3 is already past
       this point, do the extraction at the start of Phase 11 instead — don't rework finished UI now.
-- [ ] Response pane: status/time/size line, raw body in a `CodeTextView` (NSTextView wrapper, non-editable,
+      **Deferred to Phase 11**: R3 landed after Phase 3's UI was built and working, which is exactly the
+      case this item describes. See `docs/decisions.md` D11.
+- [x] Response pane: status/time/size line, raw body in a `CodeTextView` (NSTextView wrapper, non-editable,
       monospaced, no highlighting yet), headers list.
-- [ ] Environment picker in toolbar (switching only; management UI is Phase 7).
-- [ ] First-run: if no collections exist, load `SampleCollection.json` (3–4 requests to `httpbin.org`).
+- [x] Environment picker in toolbar (switching only; management UI is Phase 7).
+- [x] First-run: if no collections exist, load `SampleCollection.json` (3–4 requests to `httpbin.org`).
 - Acceptance: launch → select sample "GET /get" → ⌘↩ → 200 with body and headers visible; cancel works
   on a `https://httpbin.org/delay/10`; relaunch restores tabs.
+  *(All four are XCUITests in `PostfrauUITests/LaunchTests`, so they are checked on every `make test`
+  rather than by eye. The sample request is named "Echo query"; `ScreenshotTests` captures the window
+  in light and dark for review.)*
 
 ### Phase 4 — Request editor complete  ☐
 - [ ] `KeyValueEditor` component per §5 (used by Params, Headers, urlencoded body, form-data, variables).

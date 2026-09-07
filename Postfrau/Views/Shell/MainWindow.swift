@@ -1,60 +1,54 @@
 import SwiftUI
+import PostfrauCore
 
+/// The one window: sidebar, tab bar, request editor, response pane, status bar.
 struct MainWindow: View {
-    @State private var sidebarSelection: String? = "placeholder"
+    @Environment(AppState.self) private var state
+    @FocusState private var urlFieldFocused: Bool
 
     var body: some View {
+        @Bindable var state = state
         NavigationSplitView {
-            List(selection: $sidebarSelection) {
-                Section("Collections") {
-                    Label("Postfrau", systemImage: "shippingbox")
-                        .tag("placeholder")
-                }
-            }
-            .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 420)
+            SidebarView()
         } detail: {
-            VSplitView {
-                requestPlaceholder
-                responsePlaceholder
+            VStack(spacing: 0) {
+                TabBar()
+                if let tab = state.selectedTab {
+                    detail(for: tab, state: state)
+                } else {
+                    CenteredMessage(
+                        symbol: "square.on.square", title: "No open request",
+                        message: "Press ⌘T to open a tab.")
+                }
+                StatusBar()
             }
+            .navigationSplitViewColumnWidth(min: 520, ideal: 900)
         }
+        .navigationTitle(state.selectedTab?.title ?? "Postfrau")
         .toolbar {
             ToolbarSpacer(.flexible)
             ToolbarItem {
-                Button {
-                } label: {
-                    Label("Settings", systemImage: "gearshape")
-                }
+                EnvironmentPicker()
             }
         }
-        .navigationTitle("Postfrau")
+        .focusedSceneValue(\.appState, state)
+        .onChange(of: urlFocusRequest) { _, _ in urlFieldFocused = true }
     }
 
-    private var requestPlaceholder: some View {
-        VStack {
-            Spacer()
-            Text("Postfrau")
-                .font(.largeTitle.weight(.semibold))
-            Text("Request composer goes here.")
-                .foregroundStyle(.secondary)
-            Spacer()
+    @ViewBuilder
+    private func detail(for tab: RequestTab, state: AppState) -> some View {
+        ResizableSplit(
+            axis: state.settings.responseLayout == .vertical ? .vertical : .horizontal,
+            fraction: Binding(
+                get: { state.requestPaneFraction },
+                set: { state.requestPaneFraction = $0; state.markUIStateDirty() })
+        ) {
+            RequestEditor(tab: tab, urlFieldFocused: $urlFieldFocused)
+        } second: {
+            ResponsePane(tab: tab)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(.background)
     }
 
-    private var responsePlaceholder: some View {
-        VStack {
-            Spacer()
-            Text("No response yet — ⌘↩ to send.")
-                .foregroundStyle(.secondary)
-            Spacer()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(.background)
-    }
-}
-
-#Preview {
-    MainWindow()
+    /// Bumped by the ⌘L menu command to move focus into the URL field.
+    private var urlFocusRequest: Int { state.urlFocusRequests }
 }
