@@ -15,13 +15,15 @@ git commit. Tick the checkboxes in this file as you go so progress survives cont
 | Topic | Decision | Why |
 |---|---|---|
 | Language / UI | Swift 6.3, SwiftUI app shell, AppKit (`NSViewRepresentable`) where SwiftUI is weak (text editors, response viewer) | Truly native, fastest startup, no runtime to ship |
-| Min macOS | 15.0 (Sequoia) | Modern SwiftUI (`@Observable`, `Table`, `NavigationSplitView`) without Liquid-Glass-only APIs; dev machine is macOS 26 |
+| Min macOS | **26.0 (Tahoe)** — macOS 26 only, no back-compat shims | Owner's call. Unlocks Liquid Glass, SwiftUI `WebView`, `Observations`, Swift 6.2+ approachable concurrency, Icon Composer icons. Dev machine is macOS 26.6 / Xcode 26.6 |
+| Design language | Liquid Glass where the system puts it (toolbar, sidebar, floating panels, prominent buttons); flat, opaque surfaces for content (editors, tables, response body) | Looks like a 2025+ Mac app; glass over dense text hurts legibility, so it stays on chrome only |
 | Project generation | XcodeGen `project.yml` → `Postfrau.xcodeproj` (generated, git-ignored) | Text-based, deterministic, agent-friendly. `xcodegen` is installed at `/opt/homebrew/bin/xcodegen` |
+| Concurrency defaults | App target: `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`, `SWIFT_APPROACHABLE_CONCURRENCY = YES`. Core package: `nonisolated` default, strict concurrency complete | UI code is main-actor by default with zero annotations; Core stays explicit and portable |
 | Code split | Local SPM package `Packages/PostfrauCore` (pure Swift, Foundation only, zero UI) + app target `Postfrau` | Core is testable with plain `swift test` in seconds; UI stays thin |
 | Third-party deps | None in v1 | Fewer moving parts. Revisit only with a written justification in this file |
 | Persistence | JSON files (collections, environments, globals, UI state) in Application Support + Keychain for secrets + capped JSONL for history | Human-readable, git/iCloud-friendly, trivial to back up. No SwiftData/CoreData |
 | Networking | `URLSession` with a delegate (TLS override, redirect control, `URLSessionTaskMetrics`) | HTTP/1.1, HTTP/2, HTTP/3, system proxies, for free |
-| Concurrency | Swift 6 strict concurrency, `async/await`, actors for executor and persistence | Correctness by construction |
+| Concurrency | Swift 6 strict concurrency, `async/await`, actors for executor and persistence; `@concurrent` for CPU-heavy work (pretty-print, highlight, import) | Correctness by construction |
 | Sandbox | App Sandbox ON with `network.client` + `files.user-selected.read-write` | Keeps App Store / notarization path open; costs nothing now |
 | Bundle ID | `com.postfrau.Postfrau` | Placeholder, change freely |
 | License | MIT | "free" |
@@ -32,7 +34,7 @@ git commit. Tick the checkboxes in this file as you go so progress survives cont
 
 ### In scope (v1)
 1. Request composer: method, URL, query params, headers, auth, body (raw / form-data / urlencoded / binary / none), per-request settings.
-2. Send / cancel, response viewer (pretty JSON/XML, raw, headers, cookies), status/time/size, timing breakdown, search in body, copy, save body to file.
+2. Send / cancel, response viewer (pretty JSON/XML, raw, HTML preview via the macOS 26 SwiftUI `WebView`, headers, cookies), status/time/size, timing breakdown, search in body, copy, save body to file.
 3. Collections with nested folders; create/rename/duplicate/move/delete; drag-and-drop reorder; collection- and folder-level auth and variables (inherited).
 4. Tabs for open requests with dirty state, unsaved-changes prompt, restore on relaunch.
 5. Environments + globals; `{{variable}}` substitution everywhere; secret variables stored in Keychain; unresolved variables visibly flagged; dynamic variables (`{{$guid}}`, `{{$timestamp}}`, `{{$isoTimestamp}}`, `{{$randomInt}}`).
@@ -62,7 +64,7 @@ postfrau/
 ├── .gitignore                  ← *.xcodeproj, DerivedData, .build, xcuserdata, .DS_Store
 ├── Packages/
 │   └── PostfrauCore/
-│       ├── Package.swift       (swift-tools-version 6.0, platforms: .macOS(.v15))
+│       ├── Package.swift       (swift-tools-version 6.2, platforms: .macOS(.v26))
 │       ├── Sources/PostfrauCore/
 │       │   ├── Model/          Collection, Folder, RequestItem, Environment, Variable, Auth, Body, HistoryEntry, Ids
 │       │   ├── Resolve/        VariableResolver, Scope, DynamicVariables
@@ -82,13 +84,13 @@ postfrau/
 │   │   ├── Sidebar/            CollectionsTree, HistoryList, EnvironmentPicker, SidebarSearch
 │   │   ├── Tabs/               TabBar, TabItem
 │   │   ├── Request/            RequestEditor, URLBar, MethodPicker, ParamsTab, HeadersTab, AuthTab, BodyTab, SettingsTab, KeyValueEditor
-│   │   ├── Response/           ResponsePane, ResponseBodyView, ResponseHeadersView, CookiesView, TimingPopover, FindBar
+│   │   ├── Response/           ResponsePane, ResponseBodyView, ResponsePreview (SwiftUI WebView), ResponseHeadersView, CookiesView, TimingPopover, FindBar
 │   │   ├── Environments/       EnvironmentsWindow, VariablesEditor
 │   │   ├── QuickOpen/          QuickOpenPanel
 │   │   ├── Settings/           SettingsView
 │   │   └── Components/         CodeTextView (NSTextView wrapper), TokenTextField (URL field w/ {{var}} highlighting), Badge, EmptyState
 │   ├── Highlighting/           SyntaxHighlighter protocol, JSONHighlighter, XMLHighlighter, Theme
-│   ├── Resources/              Assets.xcassets (AppIcon), SampleCollection.json, Postfrau.entitlements, Info.plist
+│   ├── Resources/              Assets.xcassets, Postfrau.icon (Icon Composer bundle), SampleCollection.json, Postfrau.entitlements, Info.plist
 │   └── Support/                Pasteboard, FileDialogs, KeychainBridge
 ├── PostfrauUITests/            ← minimal XCUITest smoke (Phase 10)
 ├── Scripts/
@@ -199,7 +201,7 @@ Deleting a variable or environment deletes its Keychain items.
 │  ▸ Other      │ │  ☐ offset       0                                                     ││
 │ ▸ History     │ └───────────────────────────────────────────────────────────────────────┘│
 │   Today       │═════════════════════════ draggable divider ═════════════════════════════│
-│   GET /users  │ 200 OK   142 ms   2.3 KB                        Pretty Raw Headers(12) Cookies │  response header
+│   GET /users  │ 200 OK   142 ms   2.3 KB                Pretty Raw Preview Headers(12) Cookies │  response header
 │   …           │ {                                                                        │
 │               │   "users": [ … ]              ← syntax highlighted, monospace, find bar   │  response body
 ├───────────────┴─────────────────────────────────────────────────────────────────────────┤
@@ -207,6 +209,12 @@ Deleting a variable or environment deletes its Keychain items.
 └─────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
+- **Liquid Glass rules:** use the system toolbar (glass for free, `ToolbarSpacer` to group items), the standard
+  `NavigationSplitView` sidebar (glass for free), `.glassEffect()` only on floating chrome (Quick Open panel,
+  the in-flight progress capsule, environment quick-look popover), `.buttonStyle(.glassProminent)` on Send.
+  Content surfaces (editors, key-value tables, response body) are opaque `.background(.background)`;
+  scrolling content under the toolbar uses `.scrollEdgeEffectStyle(.soft, for: .top)`. Never put glass
+  behind monospace text. Respect Reduce Transparency automatically (the system does; don't fight it).
 - `NavigationSplitView` with sidebar (min 220, default 260) and detail. Detail is a vertical
   `HSplitView`/`VSplitView` (user can toggle horizontal vs vertical response layout in Settings).
 - Sidebar has two sections in one `List`: Collections (outline, expandable) and History (grouped by day).
@@ -222,7 +230,8 @@ Deleting a variable or environment deletes its Keychain items.
   field autocompletes common header names; Content-Type value autocompletes MIME types.
 - Body tab: mode picker; raw uses `CodeTextView` with language highlighting + "Beautify" button for JSON;
   form-data rows can be Text or File (file picker via `NSOpenPanel`, stored as security-scoped bookmark).
-- Response body: `CodeTextView` (NSTextView, TextKit 2, non-editable, line numbers optional). Pretty
+- Response body: `CodeTextView` (NSTextView, TextKit 2, non-editable, line numbers optional). `TextEditor`
+  gained rich text in macOS 26 but is still not a code editor; do not use it. Pretty
   mode pretty-prints JSON/XML; Raw shows bytes as text; if body > 5 MB show first 1 MB with a
   "Load full" button; if not text, show hex-dump preview + "Save to file". Find bar (⌘F) with match count.
   Word-wrap toggle. Copy button. Status line shows status code with color, total time, size; clicking
@@ -253,13 +262,17 @@ update checkboxes here → `git commit -m "Phase N: …"`. Never start phase N+1
 ### Phase 0 — Bootstrap  ☐
 - [ ] `git init`, `.gitignore`, `LICENSE` (MIT), `README.md` (one paragraph + build instructions).
 - [ ] `Packages/PostfrauCore/Package.swift` with library + test target, Swift Testing. One trivial test.
-- [ ] `project.yml`: app target `Postfrau` (macOS 15.0, SwiftUI lifecycle, `SWIFT_STRICT_CONCURRENCY=complete`,
-      `SWIFT_VERSION=6`), depends on local package `PostfrauCore`, entitlements (sandbox + network client +
+- [ ] `project.yml`: app target `Postfrau` (deployment target macOS 26.0, SwiftUI lifecycle, `SWIFT_VERSION=6`,
+      `SWIFT_STRICT_CONCURRENCY=complete`, `SWIFT_DEFAULT_ACTOR_ISOLATION=MainActor`, `SWIFT_APPROACHABLE_CONCURRENCY=YES`,
+      `SWIFT_UPCOMING_FEATURE_NONISOLATED_NONSENDING_BY_DEFAULT=YES`), depends on local package `PostfrauCore`, entitlements (sandbox + network client +
       user-selected files r/w), Info.plist with `LSMinimumSystemVersion`, `CFBundleDisplayName`, document
       types for `.json` import via drag (Phase 9), unit-test target `PostfrauTests`, UI-test target stub.
 - [ ] `Makefile`, `Scripts/bootstrap.sh`, `Scripts/screenshot.sh`
       (`open` the app, `sleep 2`, `screencapture -l $(osascript … window id)` or simply `screencapture -x /tmp/postfrau.png` of the full screen; good enough for the agent to eyeball).
-- [ ] `PostfrauApp.swift` opens a window with placeholder three-pane layout and "Postfrau" text.
+- [ ] `PostfrauApp.swift` opens a window with placeholder three-pane layout and "Postfrau" text; confirm the
+      toolbar and sidebar render as Liquid Glass with no custom styling.
+- [ ] Placeholder `Postfrau.icon` created with Icon Composer (`/Applications/Xcode.app/Contents/Applications/Icon Composer.app`)
+      or a minimal hand-written `.icon` bundle; verify it shows in the Dock in light, dark, and clear modes.
 - [ ] `CLAUDE.md`: 15 lines max — build/test commands, "Core has no UI imports", "strict concurrency",
       "no third-party deps", "update PLAN.md checkboxes", "commit per phase".
 - Acceptance: `make gen && make test && make run` all succeed from a clean clone; window appears.
@@ -301,8 +314,9 @@ update checkboxes here → `git commit -m "Phase N: …"`. Never start phase N+1
   200 + timing (verify manually once).
 
 ### Phase 3 — App shell & first end-to-end send  ☐
-- [ ] `AppState` (`@Observable`, `@MainActor`): owns `Workspace`, `WorkspaceStore`, `HistoryLog`, tabs,
-      selection, settings; every mutation goes through methods that schedule a debounced save.
+- [ ] `AppState` (`@Observable`, main-actor by default): owns `Workspace`, `WorkspaceStore`, `HistoryLog`, tabs,
+      selection, settings; every mutation goes through methods that schedule a debounced save. Implement the
+      debounce with the macOS 26 `Observations { }` async sequence over the dirty set rather than ad-hoc timers.
 - [ ] Three-pane layout per §5 with `NavigationSplitView` + split for request/response; divider persisted.
 - [ ] Sidebar: collections outline (read-only for now, from loaded data), select → opens tab.
 - [ ] Tab bar with open/close/dirty/reorder; state persisted in `ui-state.json`.
@@ -340,6 +354,9 @@ update checkboxes here → `git commit -m "Phase N: …"`. Never start phase N+1
 - [ ] Pretty / Raw / Headers / Cookies segmented tabs. Pretty = `JSONPrettyPrinter` (preserves key order and
       big-number precision: pretty-print via tokenizer, NOT via `JSONSerialization`) / `XMLPrettyPrinter`;
       falls back to Raw with a hint if the body isn't JSON/XML. Content type sniffed from header, then from bytes.
+- [ ] Preview tab: SwiftUI `WebView` (WebKit, macOS 26) rendering HTML bodies from a `WebPage` loaded with the
+      response bytes + base URL; JavaScript and network loads disabled by default (toggle in Settings), so a
+      preview can't phone home. Images (`image/*`) render via `Image(nsImage:)`; PDFs via `PDFKit`.
 - [ ] Large-body policy from §5; binary → hex preview + Save.
 - [ ] Find bar with next/prev/count, wrap toggle, line numbers toggle, copy body, save body (`NSSavePanel`).
 - [ ] Timing popover; redirect chain list (each hop: status, URL) when redirects occurred.
@@ -409,9 +426,9 @@ update checkboxes here → `git commit -m "Phase N: …"`. Never start phase N+1
 - [ ] Settings window: font size, response layout (vertical/horizontal), default timeout, default verify TLS,
       max history, "Reveal data folder", "Reset sample collection".
 - [ ] Window/state restoration, multiple windows not required (single window app; ⌘N when window is closed reopens it).
-- [ ] App icon (simple, generated as SVG → PNG set via `sips`/`iconutil`; no external tools), About window with version + license.
-- [ ] Accessibility pass: labels on everything; VoiceOver can operate URL bar, Send, tabs.
-- [ ] Performance pass with Instruments (Time Profiler + Allocations): launch < 300 ms to interactive with 50 collections; no main-thread hitch > 16 ms on send/response render for typical (< 1 MB) responses; memory < 150 MB with a 50 MB response open.
+- [ ] Final app icon as an Icon Composer `.icon` bundle (layered glass, light/dark/clear/tinted variants), About window with version + license.
+- [ ] Accessibility pass: labels on everything; VoiceOver can operate URL bar, Send, tabs; check Reduce Transparency and Increase Contrast renderings.
+- [ ] Performance pass with Instruments (Time Profiler + Allocations + SwiftUI instrument in Xcode 26): launch < 300 ms to interactive with 50 collections; no main-thread hitch > 16 ms on send/response render for typical (< 1 MB) responses; memory < 150 MB with a 50 MB response open.
 - [ ] Crash-safety: simulate kill -9 during autosave, verify files intact (atomic writes) — write a test.
 - [ ] `PostfrauUITests`: smoke test — launch, ⌘N, type URL to a local mock server (spin up an in-process
       `NWListener` HTTP responder inside the UI-test host or use `URLProtocol` via launch argument), send, assert status label.
@@ -419,14 +436,15 @@ update checkboxes here → `git commit -m "Phase N: …"`. Never start phase N+1
       `hdiutil` DMG; optional `notarytool` step guarded by env vars. Version from `MARKETING_VERSION` in project.yml.
 - [ ] README: screenshots (from `Scripts/screenshot.sh`), features, build, roadmap link to §9.
 - Acceptance: DMG builds; fresh user account (or wiped container: `rm -rf ~/Library/Containers/com.postfrau.Postfrau`)
-  launches with sample collection; entire §5 shortcut list works.
+  launches with sample collection on macOS 26; entire §5 shortcut list works.
 
 ---
 
 ## 7. Engineering rules for the executing agent
 
 1. **Core has zero UI.** `PostfrauCore` imports only Foundation/Security. If you need AppKit in Core, you're in the wrong layer.
-2. **Strict concurrency, no `@unchecked Sendable`** without a comment explaining why. UI state is `@MainActor`.
+2. **Strict concurrency, no `@unchecked Sendable`** without a comment explaining why. The app target is main-actor
+   by default (build setting); mark off-main work `@concurrent` or put it in Core actors. Core is `nonisolated` by default.
 3. **No third-party packages.** If a problem genuinely needs one (e.g. a text editor), stop, write the trade-off in `docs/decisions.md`, and prefer writing 300 lines yourself.
 4. **Never block the main thread:** network, file IO, pretty-printing, highlighting > 256 KB, import parsing all run off-main.
 5. **AppKit where SwiftUI hurts:** editors (`NSTextView`/TextKit 2), the URL token field, large outline performance if `List` proves slow (measure first).
@@ -437,6 +455,7 @@ update checkboxes here → `git commit -m "Phase N: …"`. Never start phase N+1
 10. **Deviations from this plan** are allowed when justified; record them in `docs/decisions.md` and update this file so the plan stays truthful.
 11. **Warnings are errors** in the app target (`SWIFT_TREAT_WARNINGS_AS_ERRORS=YES`) once Phase 3 compiles clean; keep it that way.
 12. **Keep the UI keyboard-first and un-cluttered.** When in doubt, mirror Postman's layout (users know it) but with native macOS controls and spacing.
+13. **macOS 26 only, and act like it.** No `if #available` ladders, no AppKit workarounds for things SwiftUI on 26 does natively. Use the glass API through system components first; hand-placed `.glassEffect()` needs a reason.
 
 ## 8. Risks & mitigations
 
@@ -450,6 +469,8 @@ update checkboxes here → `git commit -m "Phase N: …"`. Never start phase N+1
 | Postman format edge cases | Preserve unknown JSON as `extras`; surface warnings instead of failing the import |
 | Big responses blow memory | Spill > 20 MB to temp file; viewer shows a window into the file; hard cap 200 MB |
 | Precision loss pretty-printing JSON numbers | Tokenizer-based pretty printer; never round-trip through `JSONSerialization`/`Double` |
+| Liquid Glass over-applied → unreadable dense UI, or stale API names from pre-release docs | Glass on chrome only (§5); verify every SwiftUI 26 API against the local Xcode 26.6 SDK headers / docs before use; `docs/decisions.md` records any API that had to be swapped |
+| Default MainActor isolation makes Core types accidentally main-actor when moved into the app | Keep all models in Core; app target only holds views and `AppState` |
 
 ## 9. Future extension points (design for, don't build)
 
@@ -463,9 +484,10 @@ update checkboxes here → `git commit -m "Phase N: …"`. Never start phase N+1
 - **Code generation:** `CurlFormatter` generalizes to a `SnippetGenerator` protocol (Swift/URLSession, Python/requests, JS/fetch…).
 - **OpenAPI import:** new `Interop/OpenAPIImporter` producing a `Collection`.
 - **Cookie jar UI:** expose the per-profile `HTTPCookieStorage`.
+- **On-device assistance (optional, macOS 26 Foundation Models):** "describe this request in words", "explain this error", generate a request from a sentence. Strictly local, strictly optional, never required for any core flow.
 
 ## 10. Definition of done for v1
 
-- All Phase 0–10 boxes ticked; `make test` green; `Scripts/release.sh` produces a DMG that runs on a clean macOS 15 machine.
+- All Phase 0–10 boxes ticked; `make test` green; `Scripts/release.sh` produces a DMG that runs on a clean macOS 26 machine.
 - A user coming from Postman can import their collection and environment, switch environment, send
   requests with auth and bodies, read responses comfortably, and never sees a beachball.
