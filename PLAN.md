@@ -68,8 +68,8 @@ postfrau/
 │   └── PostfrauCore/
 │       ├── Package.swift       (swift-tools-version 6.2, platforms: .macOS(.v26))
 │       ├── Sources/PostfrauCore/
-│       │   ├── Model/          Collection, Folder, RequestItem, Environment, Variable, Auth, Body, HistoryEntry, Ids
-│       │   ├── Resolve/        VariableResolver, Scope, DynamicVariables
+│       │   ├── Model/          RequestCollection, Folder, RequestItem, RequestEnvironment, Variable, Auth, RequestBody, HistoryEntry, JSONValue
+│       │   ├── Resolve/        VariableResolver, VariableScope, DynamicVariables, AuthResolver
 │       │   ├── HTTP/           HTTPExecutor (actor), RequestBuilder, HTTPResponse, Timing, SessionDelegate
 │       │   ├── Persistence/    WorkspaceStore (actor), DataFolder, AtomicFile, CoordinatedFile, FolderWatcher, ConflictResolver, HistoryLog, Keychain, Migrations
 │       │   ├── Interop/        PostmanV21Importer/Exporter, PostmanEnvironment, CurlParser, CurlFormatter
@@ -124,25 +124,32 @@ All types are `Codable`, `Sendable`, `Hashable`, `Identifiable` with `UUID` ids.
 document carries `schemaVersion: Int` (start at 1). Use explicit `CodingKeys`; never rely on
 synthesized keys for persisted types so renames don't break files.
 
-```swift
-struct Workspace { var collections: [Collection]; var environments: [Environment]; var globals: [Variable]; var activeEnvironmentID: UUID? }
+Four types are renamed from the sketch below so they do not shadow `Swift.Collection`,
+`SwiftUI.Environment`, `View.Body`, or anything as generic as `Item`: they are
+`RequestCollection`, `RequestEnvironment`, `RequestBody` and `CollectionItem`
+(see `docs/decisions.md` D5).
 
-struct Collection { id, name, description: String?, auth: Auth /* .none | .inherit not allowed at root */, variables: [Variable], items: [Item], createdAt, updatedAt }
-enum Item { case folder(Folder), request(RequestItem) }      // ordered; encode with a "type" discriminator
-struct Folder { id, name, description, auth: Auth /* default .inherit */, variables: [Variable], items: [Item] }
+```swift
+struct Workspace { var collections: [RequestCollection]; var environments: [RequestEnvironment]; var globals: Globals; var activeEnvironmentID: UUID? }
+
+struct RequestCollection { id, name, description: String?, auth: Auth /* .none | .inherit not allowed at root */, variables: [Variable], items: [CollectionItem], createdAt, updatedAt, revision: Int }
+enum CollectionItem { case folder(Folder), request(RequestItem) }  // ordered; encode with a "type" discriminator
+struct Folder { id, name, description, auth: Auth /* default .inherit */, variables: [Variable], items: [CollectionItem] }
 
 struct RequestItem { id, name, method: HTTPMethod, url: String /* raw, may contain {{vars}} */,
-                     params: [KeyValue], headers: [KeyValue], auth: Auth, body: Body, settings: RequestSettings, description }
+                     params: [KeyValue], headers: [KeyValue], auth: Auth, body: RequestBody,
+                     settings: RequestSettings, description, extras: [String: JSONValue] }
 struct KeyValue { id, key: String, value: String, enabled: Bool, description: String? }
 enum HTTPMethod: String, CaseIterable { GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS; plus .custom(String) via rawValue fallback }
 
 enum Auth { case inherit, none, basic(username, password), bearer(token), apiKey(key, value, in: .header|.query) }
-enum Body { case none, raw(text: String, language: RawLanguage /* json, text, xml, html, javascript */),
-            formData([FormField]), urlEncoded([KeyValue]), binary(fileBookmark: Data?) }
+enum RequestBody { case none, raw(text: String, language: RawLanguage /* json, text, xml, html, javascript */),
+                   formData([FormField]), urlEncoded([KeyValue]), binary(FileReference) }
 struct FormField { id, key, enabled, value: FormValue /* .text(String) | .file(bookmark: Data, displayName: String) */ }
 struct RequestSettings { followRedirects = true, maxRedirects = 10, timeoutSeconds = 30, verifyTLS = true, sendCookies = true, encodeURL = true }
 
-struct Environment { id, name, variables: [Variable] }
+struct RequestEnvironment { id, name, variables: [Variable], updatedAt, revision: Int }
+struct Globals { variables: [Variable], updatedAt, revision: Int }
 struct Variable { id, key, value: String /* empty on disk if secret */, enabled, isSecret: Bool }
 
 struct HistoryEntry { id, sentAt: Date, method, resolvedURL, statusCode: Int?, durationMs, responseBytes, requestSnapshot: RequestItem, error: String? }
@@ -287,21 +294,21 @@ update checkboxes here → `git commit -m "Phase N: …"`. Never start phase N+1
       "no third-party deps", "update PLAN.md checkboxes", "commit per phase".
 - Acceptance: `make gen && make test && make run` all succeed from a clean clone; window appears.
 
-### Phase 1 — Core models, persistence, resolver  ☐
-- [ ] All model types from §3 with explicit `CodingKeys` and `schemaVersion`.
-- [ ] `Item` enum encoding with `"type": "folder" | "request"` discriminator; tests for round-trip.
-- [ ] `WorkspaceStore` actor: `load()` → `Workspace`, `save(collection:)`, `delete(collectionID:)`,
+### Phase 1 — Core models, persistence, resolver  ☑
+- [x] All model types from §3 with explicit `CodingKeys` and `schemaVersion`.
+- [x] `Item` enum encoding with `"type": "folder" | "request"` discriminator; tests for round-trip.
+- [x] `WorkspaceStore` actor: `load()` → `Workspace`, `save(collection:)`, `delete(collectionID:)`,
       same for environments, `saveGlobals`, `saveUIState`, `saveSettings`. Takes a `DataFolder` (synced root)
       and a local-state root, both injectable for tests (temp dirs). Atomic + coordinated writes. Records
       `(revision, mtime, sha256)` per written file. Debounced batching lives in the app layer, not here.
-- [ ] `Keychain` wrapper (Security framework): get/set/delete generic password; tests run against a
+- [x] `Keychain` wrapper (Security framework): get/set/delete generic password; tests run against a
       test service name and clean up after themselves (skip gracefully if Keychain is unavailable in CI).
-- [ ] `HistoryLog`: append(entry), load(limit:), clear(), prune(to:). JSONL, tolerant of a corrupt last line.
-- [ ] `VariableResolver` per §3 with `ResolveResult { text, unresolved: [String], cycles: [String] }`.
+- [x] `HistoryLog`: append(entry), load(limit:), clear(), prune(to:). JSONL, tolerant of a corrupt last line.
+- [x] `VariableResolver` per §3 with `ResolveResult { text, unresolved: [String], cycles: [String] }`.
       Dynamic variables. Tests: precedence, nesting, cycles, unresolved, `{{ spaced }}` trimmed keys,
       escaped `\{{` left alone.
-- [ ] `AuthResolver`: computes effective auth for a request given its folder chain.
-- [ ] `docs/data-format.md`.
+- [x] `AuthResolver`: computes effective auth for a request given its folder chain.
+- [x] `docs/data-format.md`.
 - Acceptance: ≥ 40 unit tests, `make core-test` < 10 s.
 
 ### Phase 2 — HTTP executor  ☐
@@ -487,7 +494,7 @@ Goal: pointing the data folder at `iCloud Drive/Postfrau` (or Google Drive, Drop
 
 ## 7. Engineering rules for the executing agent
 
-1. **Core has zero UI.** `PostfrauCore` imports only Foundation/Security. If you need AppKit in Core, you're in the wrong layer.
+1. **Core has zero UI.** `PostfrauCore` imports only Foundation, Security and CryptoKit. If you need AppKit in Core, you're in the wrong layer.
 2. **Strict concurrency, no `@unchecked Sendable`** without a comment explaining why. The app target is main-actor
    by default (build setting); mark off-main work `@concurrent` or put it in Core actors. Core is `nonisolated` by default.
 3. **No third-party packages.** If a problem genuinely needs one (e.g. a text editor), stop, write the trade-off in `docs/decisions.md`, and prefer writing 300 lines yourself.
