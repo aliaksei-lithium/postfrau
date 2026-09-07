@@ -4,6 +4,7 @@ import PostfrauCore
 /// The one window: sidebar, tab bar, request editor, response pane, status bar.
 struct MainWindow: View {
     @Environment(AppState.self) private var state
+    @Environment(\.undoManager) private var undoManager
     @FocusState private var urlFieldFocused: Bool
 
     var body: some View {
@@ -31,8 +32,21 @@ struct MainWindow: View {
                 EnvironmentPicker()
             }
         }
-        .focusedSceneValue(\.appState, state)
         .onChange(of: urlFocusRequest) { _, _ in urlFieldFocused = true }
+        // The window owns the undo manager; structural sidebar edits register their steps with it.
+        .onAppear { state.undoManager = undoManager }
+        .onChange(of: undoManager) { _, manager in state.undoManager = manager }
+        .overlay(alignment: .top) {
+            if state.isQuickOpenPresented {
+                QuickOpenPanel(isPresented: Binding(
+                    get: { state.isQuickOpenPresented },
+                    set: { state.isQuickOpenPresented = $0 }))
+                .padding(.top, 60)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+                .zIndex(2)
+            }
+        }
+        .animation(.easeOut(duration: 0.12), value: state.isQuickOpenPresented)
         .confirmationDialog(
             state.tabAwaitingCloseConfirmation.map {
                 "Save changes to “\($0.title)” before closing?"
@@ -53,6 +67,22 @@ struct MainWindow: View {
 
     @ViewBuilder
     private func detail(for tab: RequestTab, state: AppState) -> some View {
+        switch tab.kind {
+        case .collection:
+            if let subjectID = tab.subjectID {
+                CollectionEditor(collectionID: subjectID)
+            }
+        case .folder:
+            if let subjectID = tab.subjectID, let collectionID = tab.collectionID {
+                FolderEditor(folderID: subjectID, collectionID: collectionID)
+            }
+        case .request:
+            requestDetail(for: tab, state: state)
+        }
+    }
+
+    @ViewBuilder
+    private func requestDetail(for tab: RequestTab, state: AppState) -> some View {
         ResizableSplit(
             axis: state.settings.responseLayout == .vertical ? .vertical : .horizontal,
             fraction: Binding(

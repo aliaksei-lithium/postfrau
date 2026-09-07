@@ -8,6 +8,8 @@ struct StatusBar: View {
     var body: some View {
         HStack(spacing: 12) {
             Text(countsSummary)
+                .accessibilityIdentifier("workspaceCounts")
+                .accessibilityLabel(countsSummary)
             if !state.loadIssues.isEmpty {
                 let detail = state.loadIssues
                     .map { "\($0.file): \($0.message)" }

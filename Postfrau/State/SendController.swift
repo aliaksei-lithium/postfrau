@@ -191,3 +191,15 @@ extension AppState {
         return "\(base).\(ext)"
     }
 }
+
+extension AppState {
+    /// The variable scope a collection's own settings see: the active environment, the
+    /// collection's variables, then globals. No folder chain, because there is no request.
+    func resolver(for collectionID: UUID) -> VariableResolver {
+        VariableResolver(scope: VariableScope.build(
+            environment: workspace.activeEnvironment,
+            collection: workspace.collection(withID: collectionID),
+            folderChain: [],
+            globals: workspace.globals))
+    }
+}

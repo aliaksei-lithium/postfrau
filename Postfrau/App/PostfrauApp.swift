@@ -18,7 +18,7 @@ struct PostfrauApp: App {
         }
         .defaultSize(width: 1180, height: 780)
         .windowToolbarStyle(.unified)
-        .commands { AppCommands() }
+        .commands { AppCommands(state: state) }
         .onChange(of: scenePhase) { _, phase in
             // Flush on background so a force-quit cannot lose the last 300 ms of edits.
             if phase != .active {

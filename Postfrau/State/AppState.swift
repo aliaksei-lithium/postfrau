@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Observation
 import PostfrauCore
@@ -22,7 +23,19 @@ final class AppState {
     var selectedTabID: UUID?
     var sidebarSelection: UUID?
     var expandedIDs: Set<UUID> = []
+    /// What the filter field holds. The sidebar draws from `appliedSidebarFilter`, which lags it
+    /// by `filterDebounce` so a burst of typing is rendered once rather than once per keystroke —
+    /// each intermediate query matches far more than the final one, and drawing those throwaway
+    /// results is what makes a large collection feel slow.
     var sidebarFilter = ""
+    private(set) var appliedSidebarFilter = ""
+    /// Bumped by every collection edit, so the sidebar's filter cache knows when it is stale.
+    private(set) var sidebarCacheGeneration = 0
+
+    /// How long typing settles before the sidebar re-filters.
+    static let filterDebounce = Duration.milliseconds(200)
+
+    @ObservationIgnored private var filterTask: Task<Void, Never>?
 
     // MARK: Layout
 
@@ -45,9 +58,35 @@ final class AppState {
     /// Set when a menu command wants to close a tab that has unsaved work; the tab bar owns the
     /// dialog, so the command hands the decision over rather than presenting one itself.
     var tabPendingCloseConfirmation: UUID?
+    /// Whether the ⌘K panel is showing, and what has been typed into it.
+    ///
+    /// The query lives here rather than in the panel's own `@State` because the panel is presented
+    /// from an overlay whose identity SwiftUI is free to reset — which silently threw away every
+    /// keystroke, leaving the field showing text the results had never been computed from.
+    var isQuickOpenPresented = false {
+        didSet {
+            if isQuickOpenPresented != oldValue {
+                quickOpenQuery = ""
+                quickOpenSelection = 0
+            }
+        }
+    }
+    var quickOpenQuery = ""
+    var quickOpenSelection = 0
     /// Sniffing a body means reading its first bytes, which for an on-disk response is real IO;
     /// the answer never changes for a given response, so it is remembered.
     @ObservationIgnored var contentKindCache: [String: ContentKind] = [:]
+    /// The sidebar's filtered tree, memoized — see `sidebarSnapshot`.
+    @ObservationIgnored var cachedSidebar: (key: SidebarCacheKey, snapshot: FilteredCollections)?
+
+    struct SidebarCacheKey: Equatable {
+        var query: String
+        var collectionCount: Int
+        var generation: Int
+    }
+    /// The window's undo manager, handed over once the window exists. Structural sidebar edits
+    /// register their undo here so ⌘Z works the way it does everywhere else on the Mac.
+    @ObservationIgnored weak var undoManager: UndoManager?
 
     func focusURLField() { urlFocusRequests += 1 }
 
@@ -64,7 +103,7 @@ final class AppState {
     /// `Observations` can coalesce a burst of edits into one write.
     private var dirtyCollectionIDs: Set<UUID> = []
     private var dirtyEnvironmentIDs: Set<UUID> = []
-    private var deletedCollectionIDs: Set<UUID> = []
+    var deletedCollectionIDs: Set<UUID> = []
     private var deletedEnvironmentIDs: Set<UUID> = []
     private var globalsDirty = false
     private var settingsDirty = false
@@ -169,12 +208,15 @@ final class AppState {
         historyEntries = (try? await historyLog.load(limit: settings.maxHistoryEntries)) ?? []
 
         startAutosave()
+        startFilterDebounce()
     }
 
     /// Writes everything pending. Called on quit and when the window closes.
     func flush() async {
         autosaveTask?.cancel()
         autosaveTask = nil
+        filterTask?.cancel()
+        filterTask = nil
         await writePendingChanges()
         await saveUIState()
     }
@@ -223,6 +265,25 @@ final class AppState {
 
     // MARK: - Autosave
 
+    /// Watches the filter field and applies it once typing pauses.
+    private func startFilterDebounce() {
+        filterTask?.cancel()
+        filterTask = Task { [weak self] in
+            guard let self else { return }
+            for await typed in Observations({ self.sidebarFilter }) {
+                if typed == self.appliedSidebarFilter { continue }
+                // An empty field should feel instant — there is nothing to compute.
+                if typed.isEmpty {
+                    self.appliedSidebarFilter = ""
+                    continue
+                }
+                try? await Task.sleep(for: Self.filterDebounce)
+                if Task.isCancelled { return }
+                self.appliedSidebarFilter = self.sidebarFilter
+            }
+        }
+    }
+
     private func startAutosave() {
         autosaveTask?.cancel()
         autosaveTask = Task { [weak self] in
@@ -262,6 +323,7 @@ final class AppState {
     func markDirty(collection id: UUID) {
         touchUpdatedAt(collection: id)
         dirtyCollectionIDs.insert(id)
+        sidebarCacheGeneration &+= 1
     }
 
     func markDirty(environment id: UUID) {

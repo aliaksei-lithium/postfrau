@@ -43,6 +43,9 @@ enum ResponseTab: String, CaseIterable, Identifiable, Sendable {
 @Observable
 final class RequestTab: Identifiable {
     let id: UUID
+    /// What this tab is showing. Collection and folder tabs use `subjectID` and ignore `draft`.
+    var kind: TabKind
+    var subjectID: UUID?
     /// The request this tab edits, when it is saved in a collection.
     var requestID: UUID?
     var collectionID: UUID?
@@ -66,12 +69,16 @@ final class RequestTab: Identifiable {
 
     init(
         id: UUID = UUID(),
+        kind: TabKind = .request,
+        subjectID: UUID? = nil,
         requestID: UUID? = nil,
         collectionID: UUID? = nil,
         draft: RequestItem,
         isFromHistory: Bool = false
     ) {
         self.id = id
+        self.kind = kind
+        self.subjectID = subjectID
         self.requestID = requestID
         self.collectionID = collectionID
         self.draft = draft
@@ -81,7 +88,11 @@ final class RequestTab: Identifiable {
 
     /// Compares *normalized* requests, so the blank row every key/value table shows does not by
     /// itself count as an unsaved change.
-    var isDirty: Bool { draft.normalized() != savedSnapshot.normalized() }
+    /// Collection and folder tabs write straight through to the workspace, so they are never
+    /// "unsaved"; only request tabs carry a draft that can differ from what is stored.
+    var isDirty: Bool {
+        kind == .request && draft.normalized() != savedSnapshot.normalized()
+    }
 
     /// Guards the URL ↔ params mirror against feeding itself.
     @ObservationIgnored private var isSyncingQuery = false
@@ -113,6 +124,7 @@ final class RequestTab: Identifiable {
 
     /// What the tab bar shows.
     var title: String {
+        if kind != .request { return draft.name }
         if isFromHistory { return "History · \(draft.method.rawValue) \(shortPath)" }
         if !draft.name.isEmpty && draft.name != "New Request" { return draft.name }
         return draft.url.isEmpty ? "New Request" : shortPath
@@ -144,6 +156,8 @@ final class RequestTab: Identifiable {
     func snapshot() -> TabState {
         TabState(
             id: id,
+            kind: kind,
+            subjectID: subjectID,
             requestID: requestID,
             collectionID: collectionID,
             draft: draft,
@@ -155,6 +169,8 @@ final class RequestTab: Identifiable {
     convenience init(restoring state: TabState) {
         self.init(
             id: state.id,
+            kind: state.kind,
+            subjectID: state.subjectID,
             requestID: state.requestID,
             collectionID: state.collectionID,
             draft: state.draft,

@@ -30,6 +30,7 @@ final class ScreenshotTests: XCTestCase {
         self.prefix = prefix
         app.launch()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 20))
+        XCTAssertTrue(activateAndWait(app), "the app window should be interactive")
         XCTAssertTrue(
             app.staticTexts["Collection Postfrau Examples"].waitForExistence(timeout: 15))
 

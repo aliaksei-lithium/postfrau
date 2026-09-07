@@ -14,6 +14,7 @@ final class RequestEditorTests: XCTestCase {
         app.launchArguments = ["--local-root-name", stateName, "--reset-state"]
         app.launch()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 20))
+        XCTAssertTrue(activateAndWait(app), "the app window should be interactive")
         XCTAssertTrue(app.textFields["Request URL"].waitForExistence(timeout: 15)
             || app.textViews["Request URL"].waitForExistence(timeout: 5))
         return app

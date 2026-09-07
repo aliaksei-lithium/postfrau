@@ -40,7 +40,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Single-window app: clicking the Dock icon after closing the window brings it back.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
-        true
+        bringMainWindowForward()
+        return true
+    }
+
+    /// Activating Postfrau should show Postfrau. Becoming the active application does not by
+    /// itself raise a window, so a window left behind another app's stays there — the menu bar
+    /// says Postfrau while the screen shows something else.
+    func applicationDidBecomeActive(_ notification: Notification) {
+        bringMainWindowForward()
+    }
+
+    private func bringMainWindowForward() {
+        guard let window = NSApp.windows.first(where: { $0.canBecomeMain }) else { return }
+        window.makeKeyAndOrderFront(nil)
     }
 
     // MARK: - ⌘W

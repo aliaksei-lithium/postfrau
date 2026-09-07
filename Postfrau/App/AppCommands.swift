@@ -1,97 +1,129 @@
 import SwiftUI
 import PostfrauCore
 
-/// Lets menu commands reach the window's `AppState`.
-struct AppStateFocusKey: FocusedValueKey {
-    typealias Value = AppState
-}
+/// One menu item.
+///
+/// The enabled test runs inside *this* view's body rather than in the `App`'s `commands` builder.
+/// Reading `@Observable` state directly in the commands builder makes the whole Scene — window
+/// included — a dependency of that state, so every edit tears the window down and rebuilds it, and
+/// the app ends up with no visible window at all.
+private struct CommandButton: View {
+    var title: String
+    var state: AppState?
+    var isEnabled: (AppState) -> Bool = { _ in true }
+    var action: (AppState) -> Void
 
-extension FocusedValues {
-    var appState: AppState? {
-        get { self[AppStateFocusKey.self] }
-        set { self[AppStateFocusKey.self] = newValue }
+    var body: some View {
+        Button(title) {
+            guard let state else { return }
+            action(state)
+        }
+        .disabled(state.map { !isEnabled($0) } ?? true)
     }
 }
 
 /// The menu bar. Every shortcut in `PLAN.md` §5 lives here so it is discoverable, and so the
 /// keyboard works even when focus is inside a text field.
+///
+/// The state is handed in directly rather than picked up with `@FocusedValue`: Postfrau is a
+/// single-window app, so there is only ever one `AppState`, and routing through focus left
+/// commands silently disabled whenever the focused value had not propagated — a menu item that
+/// looks enabled, accepts a click, and does nothing.
 struct AppCommands: Commands {
-    @FocusedValue(\.appState) private var state
+    var state: AppState?
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
-            Button("New Request") { state?.newTab() }
+            CommandButton(title: "New Request", state: state) { $0.newTab() }
                 .keyboardShortcut("n", modifiers: .command)
-                .disabled(state == nil)
-            Button("New Tab") { state?.newTab() }
+            CommandButton(title: "New Tab", state: state) { $0.newTab() }
                 .keyboardShortcut("t", modifiers: .command)
-                .disabled(state == nil)
+            CommandButton(title: "New Collection", state: state) { $0.newCollection() }
+                .keyboardShortcut("n", modifiers: [.command, .shift])
         }
 
         CommandGroup(after: .saveItem) {
-            Button("Save Request") {
-                guard let state, let tab = state.selectedTab else { return }
-                state.saveTab(tab)
-            }
+            CommandButton(
+                title: "Save Request", state: state,
+                isEnabled: { $0.selectedTab?.kind == .request },
+                action: { state in
+                    guard let tab = state.selectedTab else { return }
+                    state.saveTab(tab)
+                })
             .keyboardShortcut("s", modifiers: .command)
-            .disabled(state?.selectedTab == nil)
         }
 
         CommandGroup(replacing: .textEditing) {}
 
         CommandMenu("Request") {
-            Button("Send") {
-                guard let state, let tab = state.selectedTab else { return }
-                state.send(tab)
-            }
+            CommandButton(
+                title: "Send", state: state,
+                isEnabled: { $0.selectedTab?.kind == .request },
+                action: { state in
+                    guard let tab = state.selectedTab else { return }
+                    state.send(tab)
+                })
             .keyboardShortcut(.return, modifiers: .command)
-            .disabled(state?.selectedTab == nil)
 
-            Button("Cancel") {
-                guard let state, let tab = state.selectedTab else { return }
-                state.cancelSend(tab)
-            }
+            CommandButton(
+                title: "Cancel", state: state,
+                isEnabled: { $0.selectedTab?.isSending == true },
+                action: { state in
+                    guard let tab = state.selectedTab else { return }
+                    state.cancelSend(tab)
+                })
             .keyboardShortcut(".", modifiers: .command)
-            .disabled(state?.selectedTab?.isSending != true)
 
             Divider()
 
-            Button("Focus URL") { state?.focusURLField() }
-                .keyboardShortcut("l", modifiers: .command)
-                .disabled(state == nil)
+            CommandButton(title: "Quick Open…", state: state) { $0.isQuickOpenPresented = true }
+                .keyboardShortcut("k", modifiers: .command)
 
-            Button("Find in Response") { state?.selectedTab?.findRequests += 1 }
-                .keyboardShortcut("f", modifiers: .command)
-                .disabled(state?.selectedTab?.response == nil)
+            CommandButton(title: "Focus URL", state: state) { $0.focusURLField() }
+                .keyboardShortcut("l", modifiers: .command)
+
+            CommandButton(
+                title: "Find in Response", state: state,
+                isEnabled: { $0.selectedTab?.response != nil },
+                action: { $0.selectedTab?.findRequests += 1 })
+            .keyboardShortcut("f", modifiers: .command)
 
             Divider()
 
             ForEach(Array(EditorTab.allCases.enumerated()), id: \.element) { index, editorTab in
-                Button(editorTab.title) { state?.selectedTab?.selectedEditorTab = editorTab }
-                    .keyboardShortcut(
-                        KeyEquivalent(Character("\(index + 1)")), modifiers: .command)
-                    .disabled(state?.selectedTab == nil)
+                CommandButton(
+                    title: editorTab.title, state: state,
+                    isEnabled: { $0.selectedTab?.kind == .request },
+                    action: { $0.selectedTab?.selectedEditorTab = editorTab })
+                .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: .command)
             }
         }
 
         CommandGroup(after: .windowList) {
-            Button("Next Tab") { state?.selectNextTab() }
+            CommandButton(title: "Next Tab", state: state) { $0.selectNextTab() }
                 .keyboardShortcut("]", modifiers: [.command, .shift])
-                .disabled(state == nil)
-            Button("Previous Tab") { state?.selectPreviousTab() }
+            CommandButton(title: "Previous Tab", state: state) { $0.selectPreviousTab() }
                 .keyboardShortcut("[", modifiers: [.command, .shift])
-                .disabled(state == nil)
             // The ⌘W here is the menu's label; `AppDelegate` intercepts the keystroke itself,
             // because AppKit's File ▸ Close would otherwise win the key equivalent.
-            Button("Close Tab") { state?.closeSelectedTab() }
+            CommandButton(title: "Close Tab", state: state) { $0.closeSelectedTab() }
                 .keyboardShortcut("w", modifiers: .command)
-                .disabled(state == nil)
         }
 
         CommandGroup(after: .toolbar) {
-            Button("Toggle Response Layout") { state?.toggleResponseLayout() }
-                .keyboardShortcut("r", modifiers: [.command, .option])
-                .disabled(state == nil)
+            CommandButton(title: "Toggle Response Layout", state: state) {
+                $0.toggleResponseLayout()
+            }
+            .keyboardShortcut("r", modifiers: [.command, .option])
         }
+
+        #if DEBUG
+        CommandMenu("Debug") {
+            // §1 asks the app to stay usable with 5 000 requests; this is how that gets measured.
+            CommandButton(title: "Generate Stress Collection (5 000)", state: state) {
+                $0.generateStressCollection()
+            }
+        }
+        #endif
     }
 }

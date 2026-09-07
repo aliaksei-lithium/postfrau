@@ -27,6 +27,7 @@ final class LaunchTests: XCTestCase {
         app.launchArguments = ["--local-root-name", stateName] + (fresh ? ["--reset-state"] : [])
         app.launch()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 20))
+        XCTAssertTrue(activateAndWait(app), "the app window should be interactive")
         return app
     }
 

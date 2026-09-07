@@ -24,6 +24,7 @@ final class ResponseViewerTests: XCTestCase {
         app.launchArguments = ["--local-root-name", stateName, "--reset-state"]
         app.launch()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 20))
+        XCTAssertTrue(activateAndWait(app), "the app window should be interactive")
         XCTAssertTrue(app.textFields["Request URL"].waitForExistence(timeout: 15))
         return app
     }

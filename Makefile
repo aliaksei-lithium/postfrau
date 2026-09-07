@@ -13,7 +13,7 @@ DEST       := platform=macOS
 # xcodebuild is extremely noisy; keep only diagnostics and the verdict.
 FILTER     := (grep -E "^(/|\.).*:[0-9]+:[0-9]+: (error|warning): |^(error|warning): |^\*\* [A-Z]+ (SUCCEEDED|FAILED)|^Testing failed" || true)
 
-.PHONY: all gen build test core-test app-test run clean release screenshot
+.PHONY: all gen build test core-test app-test ui-test run clean release screenshot
 
 all: build
 
@@ -31,9 +31,20 @@ build: $(PROJECT)
 core-test:
 	@cd $(CORE) && swift test 2>&1 | grep -vE "^◇" || (cd $(CORE) && swift test)
 
+# Unit tests for the app target. These need no window, so they always run.
 app-test: $(PROJECT)
 	@set -o pipefail; xcodebuild -project $(PROJECT) -scheme $(SCHEME) \
-		-configuration Debug -destination '$(DEST)' test 2>&1 | $(FILTER)
+		-configuration Debug -destination '$(DEST)' test \
+		-only-testing:PostfrauTests 2>&1 | $(FILTER)
+
+# XCUITests drive the real UI, so they need a display where Postfrau's window can come to the
+# front. They fail with "unable to find hit point" when something else owns the screen — a
+# full-screen app on its own Space, a locked screen, screen sharing. Kept out of `make test` for
+# that reason; run them yourself when the desktop is free. See docs/decisions.md D22.
+ui-test: $(PROJECT)
+	@set -o pipefail; xcodebuild -project $(PROJECT) -scheme $(SCHEME) \
+		-configuration Debug -destination '$(DEST)' test \
+		-only-testing:PostfrauUITests 2>&1 | $(FILTER)
 
 test: core-test app-test
 

@@ -227,3 +227,103 @@ extension Folder {
         return nil
     }
 }
+
+/// Where an item should land when it is dropped.
+public struct DropTarget: Sendable, Hashable {
+    /// The folder to drop into, or nil for the collection's root.
+    public var parentID: UUID?
+    /// Position among that parent's children, or nil to append.
+    public var index: Int?
+
+    public init(parentID: UUID?, index: Int? = nil) {
+        self.parentID = parentID
+        self.index = index
+    }
+}
+
+extension RequestCollection {
+    /// Moves an item within this collection.
+    ///
+    /// Returns false when the move is impossible or meaningless: the item is not here, the target
+    /// folder does not exist, or the item is a folder being dropped inside itself — which would
+    /// detach that whole subtree from the tree.
+    @discardableResult
+    public mutating func move(itemWithID id: UUID, to target: DropTarget) -> Bool {
+        guard item(withID: id) != nil else { return false }
+        if let parentID = target.parentID {
+            guard folder(withID: parentID) != nil else { return false }
+            // Dropping a folder into itself or into one of its own descendants would orphan it.
+            if item(withID: id)?.asFolder != nil,
+               folder(parentID, isInsideOrEqualTo: id) { return false }
+        }
+
+        // The index is expressed against the parent's children *before* the removal, so a move
+        // within one parent has to account for the item vanishing from earlier in the list.
+        var adjustedIndex = target.index
+        if let index = target.index, currentParentID(of: id) == target.parentID,
+           let currentIndex = currentIndex(of: id), currentIndex < index {
+            adjustedIndex = index - 1
+        }
+
+        guard let removed = remove(itemWithID: id) else { return false }
+        guard insert(removed, into: target.parentID, at: adjustedIndex) else {
+            // Put it back rather than losing it.
+            insert(removed, into: currentParentID(of: id), at: nil)
+            return false
+        }
+        return true
+    }
+
+    /// The folder containing `id`, or nil when it sits at the collection's root.
+    public func currentParentID(of id: UUID) -> UUID? {
+        folderChain(to: id)?.last
+    }
+
+    /// The item's position among its siblings.
+    public func currentIndex(of id: UUID) -> Int? {
+        let siblings: [CollectionItem]
+        if let parentID = currentParentID(of: id) {
+            siblings = folder(withID: parentID)?.items ?? []
+        } else {
+            siblings = items
+        }
+        return siblings.firstIndex { $0.id == id }
+    }
+
+    /// A collection of `requestCount` requests spread over a three-level folder tree, for
+    /// measuring the sidebar at the scale `PLAN.md` §1 calls for.
+    public static func makeStressCollection(
+        requestCount: Int = 5000, name: String = "Stress Test"
+    ) -> RequestCollection {
+        let perFolder = 25
+        let foldersNeeded = max(1, (requestCount + perFolder - 1) / perFolder)
+        let groupsNeeded = max(1, Int(Double(foldersNeeded).squareRoot().rounded(.up)))
+
+        var remaining = requestCount
+        var groups: [CollectionItem] = []
+
+        for groupIndex in 0..<groupsNeeded where remaining > 0 {
+            var folders: [CollectionItem] = []
+            for folderIndex in 0..<groupsNeeded where remaining > 0 {
+                var requests: [CollectionItem] = []
+                for _ in 0..<min(perFolder, remaining) {
+                    let number = requestCount - remaining
+                    requests.append(.request(RequestItem(
+                        name: "Request \(number)",
+                        method: HTTPMethod.allCases[number % HTTPMethod.allCases.count],
+                        url: "{{baseUrl}}/group\(groupIndex)/folder\(folderIndex)/item\(number)",
+                        params: [KeyValue(key: "page", value: "\(number % 10)")])))
+                    remaining -= 1
+                }
+                folders.append(.folder(Folder(name: "Folder \(folderIndex)", items: requests)))
+            }
+            groups.append(.folder(Folder(name: "Group \(groupIndex)", items: folders)))
+        }
+
+        return RequestCollection(
+            name: name,
+            description: "Generated for performance testing. Safe to delete.",
+            variables: [Variable(key: "baseUrl", value: "https://example.test")],
+            items: groups)
+    }
+}

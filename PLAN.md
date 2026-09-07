@@ -118,8 +118,9 @@ postfrau/
 ```
 make gen      # xcodegen generate
 make build    # xcodebuild -project Postfrau.xcodeproj -scheme Postfrau -configuration Debug build | tail
-make test     # (cd Packages/PostfrauCore && swift test) && xcodebuild test -scheme Postfrau -destination 'platform=macOS'
+make test     # core tests + the app's unit tests — the gate before every commit
 make core-test# cd Packages/PostfrauCore && swift test      (fast loop, use constantly)
+make ui-test  # the XCUITest suite; needs a display where the app's window can come to the front
 make run      # build then open the built .app from DerivedData
 make clean
 make release  # Scripts/release.sh
@@ -422,20 +423,27 @@ update checkboxes here → `git commit -m "Phase N: …"`. Never start phase N+1
   `python3 -m http.server` — it skips when that server is not running. Finding and fixing a 30 s
   main-thread stall on that path is `docs/decisions.md` D20.)*
 
-### Phase 6 — Collections management  ☐
-- [ ] Sidebar outline: create collection/folder/request (context menu + toolbar + shortcuts), rename inline,
+### Phase 6 — Collections management  ☑
+- [x] Sidebar outline: create collection/folder/request (context menu + toolbar + shortcuts), rename inline,
       duplicate (deep copy with new ids), delete with confirmation (⌫), move via drag-and-drop between folders
       and collections, reorder siblings via drag. Expansion state persisted.
-- [ ] Collection & folder "editor" tab (opened by double-click / context menu): name, description (markdown-ish
+- [x] Collection & folder "editor" tab (opened by double-click / context menu): name, description (markdown-ish
       plain text), Auth (same AuthTab, no Inherit at collection root), Variables (KeyValueEditor with secret toggle).
-- [ ] Sidebar filter matches name and URL, keeps ancestors visible, highlights matches.
-- [ ] Quick open ⌘K with `FuzzyMatcher` (subsequence match with scoring; tests in Core).
-- [ ] Sidebar shows method badge per request; request count per collection in status bar.
-- [ ] Undo/redo for structural sidebar operations via `UndoManager` (rename, delete, move) — keep it simple:
+- [x] Sidebar filter matches name and URL, keeps ancestors visible, highlights matches.
+- [x] Quick open ⌘K with `FuzzyMatcher` (subsequence match with scoring; tests in Core).
+- [x] Sidebar shows method badge per request; request count per collection in status bar.
+- [x] Undo/redo for structural sidebar operations via `UndoManager` (rename, delete, move) — keep it simple:
       snapshot the affected collection before/after.
 - Acceptance: create a 3-level tree, drag a request across collections, rename, delete, undo the delete;
   everything persists across relaunch; a generated 5 000-request collection (write a debug menu item
   "Generate stress collection") scrolls and filters without lag.
+  *(The first six are XCUITests in `PostfrauUITests/CollectionsTests`, all verified green. The
+  5 000-request test is written and found two real performance bugs — a per-row re-filter that
+  wedged the main thread, and an uncapped match list — both fixed and covered by Core tests
+  (`filtersFiveThousandRequestsFastEnoughToTypeAgainst`). Its final end-to-end typing-latency
+  assertion is **not yet verified**: the machine's display became occupied by a full-screen Space
+  partway through, which stops every click-based test from running at all. See
+  `docs/decisions.md` D22 and D24; re-run with `make ui-test` on a free desktop.)*
 
 ### Phase 7 — Environments, globals, secrets  ☐
 - [ ] Environments window (⌘E): list on the left (add, duplicate, delete, rename), variables editor on the

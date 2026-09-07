@@ -236,3 +236,56 @@ Response" button.
 match count and find-and-scroll. ⌘F (menu: Request ▸ Find in Response) bumps a counter the body
 view watches, which opens the bar and takes first responder. Writing one by hand would be more
 code and less familiar.
+
+## D22 — XCUITests moved out of `make test` into `make ui-test`
+
+**Phase 6.** The XCUITest suite drives the real UI, which means it needs a display where
+Postfrau's window can come to the front. Partway through this phase the development machine ended
+up with a full-screen app occupying its own Space; from then on *every* click-based test failed
+with "unable to find hit point", including tests that had passed minutes earlier on unchanged,
+committed code. Diagnosis: `XCUIApplication.windows.count == 0` while child elements still
+resolved with correct screen frames — the app was frontmost (its menu bar was showing) but its
+window was on another Space, so nothing was clickable. Neither `activate()`,
+`makeKeyAndOrderFront`, nor `.moveToActiveSpace` can pull a normal window onto a full-screen
+Space, and moving somebody else's windows is not the app's business.
+
+So `make test` — the gate before every commit — runs the Core tests and the app's unit tests,
+which need no window and are deterministic. `make ui-test` runs the XCUITests and is run when the
+desktop is free. `Scripts/screenshot.sh` now captures the window by id with `.optionAll` rather
+than by screen region, so visual checks keep working even when the window is occluded or on
+another Space.
+
+## D23 — Undo is whole-collection snapshots
+
+**Phase 6.** Every structural sidebar edit registers an undo that restores a copy of the affected
+collection taken before the change. Hand-written inverses for move / delete / duplicate across a
+nested tree are where undo bugs live, and the trees are small enough that a snapshot is cheap — a
+5 000-request collection is about 2 MB of model, and these are user-scale actions, not keystrokes.
+Cross-collection moves snapshot both sides under one action name so a single ⌘Z puts everything
+back.
+
+## D24 — The sidebar filter is computed once per change, not per row, and capped
+
+**Phase 6.** The 5 000-request stress test found the obvious implementation to be quadratic: each
+`DisclosureGroup` asked "should I be forced open?", and each answer re-filtered the whole tree —
+O(rows x tree) *per frame*. It wedged the main thread badly enough that XCUITest could not deliver
+keystrokes at all. `AppState.sidebarSnapshot` now computes the pruned tree and the forced-open set
+in one traversal, memoized against (query, collection count, edit generation), and the rows are
+handed the result.
+
+Two further changes came from the same measurement: matches are capped at 200 with the sidebar
+saying how many were left out — a broad query matches thousands of requests, and drawing thousands
+of force-expanded outline rows is slow however fast the filtering is — and the filter is debounced
+by 200 ms so a burst of typing renders once rather than once per keystroke.
+
+## D25 — Menu commands hold the state instead of reading it through focus
+
+**Phase 6.** `AppCommands` took its `AppState` from `@FocusedValue`, which left menu items
+silently disabled whenever the focused value had not propagated: the Debug ▸ Generate Stress
+Collection item looked enabled, accepted a click, and did nothing. Postfrau is a single-window app
+with exactly one `AppState`, so the state is now passed into `AppCommands` directly.
+
+The enabled test for each item runs inside a small `CommandButton` view rather than in the `App`'s
+`commands` builder. Reading `@Observable` state directly in that builder makes the whole Scene —
+the window included — a dependency of the state, so every edit tears the window down and rebuilds
+it.
