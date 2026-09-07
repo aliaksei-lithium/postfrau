@@ -45,6 +45,9 @@ final class AppState {
     /// Set when a menu command wants to close a tab that has unsaved work; the tab bar owns the
     /// dialog, so the command hands the decision over rather than presenting one itself.
     var tabPendingCloseConfirmation: UUID?
+    /// Sniffing a body means reading its first bytes, which for an on-disk response is real IO;
+    /// the answer never changes for a given response, so it is remembered.
+    @ObservationIgnored var contentKindCache: [String: ContentKind] = [:]
 
     func focusURLField() { urlFocusRequests += 1 }
 

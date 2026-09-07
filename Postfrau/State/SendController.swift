@@ -147,3 +147,47 @@ extension AppState {
         return built?.warnings ?? []
     }
 }
+
+extension AppState {
+    /// What a response body actually is, header and bytes both considered.
+    ///
+    /// Cached per response so switching tabs does not re-sniff a 50 MB body.
+    func contentKind(for response: HTTPResponse) -> ContentKind {
+        let key = "\(response.finalURL)|\(response.byteCount)|\(response.mimeType ?? "")"
+        if let cached = contentKindCache[key] { return cached }
+        let head = (try? response.body.prefix(1024)) ?? Data()
+        let kind = ContentTypeSniffer.kind(mimeType: response.mimeType, bytes: head)
+        contentKindCache[key] = kind
+        return kind
+    }
+
+    /// Reads a response body off the main actor, for copy and save.
+    func readBody(_ response: HTTPResponse) async -> Data? {
+        await Self.read(response.body)
+    }
+
+    @concurrent
+    private static func read(_ body: ResponseBody) async -> Data? {
+        try? body.data()
+    }
+
+    /// A sensible filename for "Save Body…", derived from the URL and the content type.
+    func suggestedFilename(for response: HTTPResponse) -> String {
+        let components = URLComponents(string: response.finalURL)
+        let lastPath = components?.path
+            .split(separator: "/").last.map(String.init) ?? "response"
+        let base = lastPath.isEmpty ? "response" : lastPath
+        if base.contains(".") { return base }
+
+        let ext = switch contentKind(for: response) {
+        case .json: "json"
+        case .xml: "xml"
+        case .html: "html"
+        case .text: "txt"
+        case .pdf: "pdf"
+        case .image(let subtype): subtype == "jpeg" ? "jpg" : subtype
+        case .binary: "bin"
+        }
+        return "\(base).\(ext)"
+    }
+}

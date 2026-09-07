@@ -60,6 +60,10 @@ struct AppCommands: Commands {
                 .keyboardShortcut("l", modifiers: .command)
                 .disabled(state == nil)
 
+            Button("Find in Response") { state?.selectedTab?.findRequests += 1 }
+                .keyboardShortcut("f", modifiers: .command)
+                .disabled(state?.selectedTab?.response == nil)
+
             Divider()
 
             ForEach(Array(EditorTab.allCases.enumerated()), id: \.element) { index, editorTab in

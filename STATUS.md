@@ -1,8 +1,8 @@
 # Postfrau — status
 
-**Current phase:** 5 (Response viewer) — next
-**Last completed:** Phase 4 — Request editor complete
-**Build:** green — `make test` passes: 227 Core tests (~5 s), app unit tests, and 12 XCUITests that
+**Current phase:** 6 (Collections management) — next
+**Last completed:** Phase 5 — Response viewer
+**Build:** green — `make test` passes: 270 Core tests (~5 s), app unit tests, and 16 XCUITests that
 drive the real UI.
 
 > **Plan revision R3** (`PLAN.md`, 2026-09-07) added a `postfrau` CLI + Claude Code skill as
@@ -13,44 +13,47 @@ drive the real UI.
 
 ## What works
 
-**The request composer is complete.** A POST with a JSON body, a bearer token and two query
-parameters against `httpbin.org/anything` comes back with everything echoed correctly, and a
-form-data file upload — picked through `NSOpenPanel`, stored as a security-scoped bookmark,
-streamed from disk — arrives with its contents intact. Both are XCUITests, not claims.
+**Compose a request, send it, read the response.** That whole loop is done and checked by tests
+that drive the real UI, not by eye.
 
-- **Core** (Phases 1–2, plus Phase 4 additions): domain model, `WorkspaceStore`,
-  `VariableResolver`, `AuthResolver`, `Keychain`, `HistoryLog`, `RequestBuilder`, `HTTPExecutor`,
-  and now `JSONPrettyPrinter` (byte-level tokenizer: key order, duplicate keys and full number
-  precision survive; 2.2 MB in well under a second), `KeyValueRows`, `HeaderCatalog`.
-- **App**: everything from Phase 3, plus the full editor — `KeyValueEditor` with a trailing blank
-  row, hover-delete and ⌘⌫; Params mirrored two-way with the URL; Headers with name/value
-  autocomplete and a read-only "Postfrau will also send" section computed by the real builder;
-  the Auth tab (Inherit / None / Basic / Bearer / API Key) with reveal toggles and an on-the-wire
-  preview; every body mode with a JSON Beautify button and file pickers; a `TokenTextField` URL bar
-  that colours `{{variables}}` green or red and explains them on hover; dirty tracking with a
-  Save / Don't Save / Cancel prompt; inline rename from the tab and the sidebar.
+- **Core**: domain model and persistence; variable and auth resolvers; `RequestBuilder` and
+  `HTTPExecutor`; `JSONPrettyPrinter` and `XMLPrettyPrinter` (tokenizers — key order, duplicate
+  keys and number precision all survive); `JSONHighlighter` and `XMLHighlighter`;
+  `ContentTypeSniffer`; `KeyValueRows`, `HeaderCatalog`, `ByteCount`.
+- **Request editor**: key/value tables with completion, params mirrored two-way with the URL,
+  headers plus a computed "Postfrau will also send" list, the full auth tab, every body mode with
+  JSON Beautify and file pickers, a URL field that colours and explains `{{variables}}`, dirty
+  tracking with a save prompt, inline rename.
+- **Response viewer**: Pretty / Raw / Preview / Headers / Cookies; syntax highlighting computed
+  off-main and applied when ready; HTML rendered in a `WebView` with JavaScript *and* subresource
+  loading off so a preview cannot phone home; images and PDFs inline; a hex dump plus Save for
+  binary; the system find bar (⌘F); wrap and line-number toggles; copy and save; a timing popover
+  with a per-phase bar chart; the redirect chain; a friendly error card with Retry.
+
+**Measured**: 2.2 MB pretty-prints in ~0.6 s and tokenizes in ~0.18 s. A 22 MB response downloads,
+renders its first megabyte, and stays interactive while switching views and scrolling.
 
 ## Next
 
-Phase 5: the response viewer — `JSONHighlighter` / `XMLHighlighter`, Pretty / Raw / Preview tabs
-(SwiftUI `WebView` with JavaScript off), the large-body policy, find bar, timing popover, redirect
-chain, and the hex view for binary responses.
+Phase 6: sidebar editing — create / rename / duplicate / delete / drag-and-drop, the collection and
+folder editor, filtering, ⌘K quick open, undo, and the 5 000-request stress test.
 
 ## Known issues / limitations
 
-- The response body is not syntax-highlighted or pretty-printed yet (Phase 5).
-- Sidebar is read-only — no create/delete/drag; only rename (Phase 6).
-- No environments editor yet (Phase 7): variables can be read but not edited in the UI.
+- Sidebar is read-only apart from rename (Phase 6). No environments editor yet (Phase 7).
+- The Settings *window* does not exist yet (Phase 12), so preferences that have no inline control —
+  notably "allow JavaScript in previews" — can only be changed by editing `settings.json`.
 - `URLSession` occasionally leaves a `CFNetworkDownload_*.tmp` in the container's tmp when a
   download is cancelled. Postfrau's own spill files are cleaned up; these are the framework's.
 - App icon is a placeholder mark (Phase 12). Hardened runtime is off in the generated project and
   enabled only by `Scripts/release.sh` (`docs/decisions.md` D3).
+- `ResponseViewerTests.testALargeResponseStaysResponsive` needs a local fixture server and skips
+  without one; the file's doc comment says how to start it.
 
 ## Decisions taken
 
-`docs/decisions.md` D1–D18. Most consequential: D5 model type renames · D9 `download(for:)` instead
-of `bytes(for:)` (~40x faster on large bodies) · D11 `Commands` extraction deferred to Phase 11 ·
-D13 four accessibility defects only driving the real UI could find · D16 pretty printer built a
-phase early · D17 blank editor rows normalized out of dirty tracking · D18 ⌘W intercepted with a
-key monitor, because SwiftUI reverts menu edits and a `Window` scene quits when its last window
-closes.
+`docs/decisions.md` D1–D21. Most consequential: D9 `download(for:)` instead of `bytes(for:)`
+(~40x faster on large bodies) · D11 `Commands` extraction deferred to Phase 11 · D13 accessibility
+defects only driving the real UI could find · D18 ⌘W intercepted with a key monitor ·
+D20 response bodies wrap by default, after sampling found TextKit measuring one multi-megabyte
+line and blocking the main thread for 30 s.

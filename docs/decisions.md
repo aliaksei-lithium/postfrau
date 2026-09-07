@@ -197,3 +197,42 @@ now returns false (closing the window should not quit a single-window app — Ph
 bring it back), and the unsaved-changes confirmation moved from the tab row to the window. A
 `confirmationDialog` presented by the very view that is about to be removed is a crash waiting to
 happen; the window outlives every tab.
+
+## D19 — Highlighters live in Core and emit kinds, not colours
+
+**Phase 5.** `PLAN.md` §2 puts `Highlighting/` in the app target. The tokenizers are pure text
+processing and exactly the kind of thing §7 rule 7 says must be tested, so they live in
+`PostfrauCore/Text` and are covered by `swift test`; they emit `SyntaxKind`s and UTF-16 offsets.
+The app keeps `Highlighting/Theme.swift`, which maps kinds to `NSColor`s built from system colours
+so light, dark and Increase Contrast all come for free. `PLAN.md` §2's tree has been updated.
+
+Both tokenizers scan the UTF-16 view rather than `Character`s: every character JSON and XML give
+structural meaning is ASCII, the offsets are then directly usable as `NSRange`s, and grapheme
+breaking a multi-megabyte document is far too slow. Neither ever throws — a truncated response
+must still be readable, so malformed input is coloured as best it can be.
+
+## D20 — Response bodies wrap by default, and TextKit is why
+
+**Phase 5.** The 20 MB acceptance test failed with XCUITest reporting *"process main thread busy
+for 30.0s"*. Sampling the stuck process put the whole main thread inside
+`NSTextView._updateContentHeight` → `NSTextLayoutManager.estimatedSizeForLastTextContainer` →
+`CTLineGetOffsetForStringIndex` → `TLine::EnumerateCaretOffsets`.
+
+The cause: with wrapping off, the text container is unbounded, so TextKit has to measure the widest
+line *in full* to size the view. A minified JSON response is a single line several megabytes long,
+and measuring one costs tens of seconds. Measured separately, setting a 1 MB string takes 30 ms
+without wrapping and 0.3 ms with it — and that fixture had newlines; a single long line is far
+worse. `wrapResponseLines` therefore defaults to true, with the toggle still in the response menu.
+
+Two smaller fixes came from the same investigation: line counting for the gutter moved from
+`Character`s to UTF-8 (7 ms → 1.8 ms per update on 1 MB), and the render limit now follows §5
+properly — bodies up to 5 MB render whole, larger ones show the first 1 MB with a "Load Full
+Response" button.
+
+## D21 — The system find bar instead of a hand-rolled one
+
+**Phase 5.** `PLAN.md` §5 asks for a find bar with match count, next/previous and a wrap toggle.
+`NSTextView.usesFindBar` provides exactly that, in the form every other Mac app uses, including
+match count and find-and-scroll. ⌘F (menu: Request ▸ Find in Response) bumps a counter the body
+view watches, which opens the bar and takes first responder. Writing one by hand would be more
+code and less familiar.

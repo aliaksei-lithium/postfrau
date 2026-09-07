@@ -41,7 +41,7 @@ public struct AppSettings: Sendable, Hashable, Codable {
         defaultVerifyTLS: Bool = true,
         maxHistoryEntries: Int = 1000,
         allowPreviewJavaScript: Bool = false,
-        wrapResponseLines: Bool = false,
+        wrapResponseLines: Bool = true,
         showResponseLineNumbers: Bool = false
     ) {
         self.dataFolderBookmark = dataFolderBookmark

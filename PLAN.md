@@ -81,7 +81,7 @@ postfrau/
 │       │   ├── Commands/       Command structs + CommandRunner: SendRequest, RunFolder, AddRequest, UpdateRequest, MoveItem, SetVariable… (shared by app, CLI, future MCP)
 │       │   ├── Persistence/    WorkspaceStore (actor), DataFolder, AtomicFile, CoordinatedFile, FolderWatcher, ConflictResolver, HistoryStore (per-entry files; replaces HistoryLog in Phase 8), Keychain, Migrations
 │       │   ├── Interop/        PostmanV21Importer/Exporter, PostmanEnvironment, CurlParser, CurlFormatter
-│       │   ├── Text/           JSONPrettyPrinter, XMLPrettyPrinter, ContentTypeSniffer
+│       │   ├── Text/           JSONPrettyPrinter, XMLPrettyPrinter, ContentTypeSniffer, SyntaxHighlighter + JSON/XML highlighters
 │       │   └── Util/           FuzzyMatcher, ByteCount, Debouncer
 │       ├── Sources/postfrau/           ← CLI executable target (Phase 11): ArgumentParser-free hand-rolled parser, Output (human/json), Commands mapping
 │       └── Tests/PostfrauCoreTests/
@@ -101,7 +101,7 @@ postfrau/
 │   │   ├── QuickOpen/          QuickOpenPanel
 │   │   ├── Settings/           SettingsView, DataLocationPane, SyncStatusBanner
 │   │   └── Components/         CodeTextView (NSTextView wrapper), TokenTextField (URL field w/ {{var}} highlighting), Badge, EmptyState
-│   ├── Highlighting/           SyntaxHighlighter protocol, JSONHighlighter, XMLHighlighter, Theme
+│   ├── Highlighting/           Theme (kind → NSColor). The tokenizers live in Core/Text — see docs/decisions.md D19
 │   ├── Resources/              Assets.xcassets, Postfrau.icon (Icon Composer bundle), SampleCollection.json, Postfrau.entitlements, Info.plist
 │   └── Support/                Pasteboard, FileDialogs, KeychainBridge
 ├── PostfrauUITests/            ← minimal XCUITest smoke (Phase 12)
@@ -396,24 +396,31 @@ update checkboxes here → `git commit -m "Phase N: …"`. Never start phase N+1
   *(All three are XCUITests in `PostfrauUITests/RequestEditorTests`, driven through the real UI — the file
   upload really does go through `NSOpenPanel` and a security-scoped bookmark.)*
 
-### Phase 5 — Response viewer  ☐
-- [ ] `SyntaxHighlighter` protocol + `JSONHighlighter` (hand-written tokenizer, O(n), no regex over the
+### Phase 5 — Response viewer  ☑
+- [x] `SyntaxHighlighter` protocol + `JSONHighlighter` (hand-written tokenizer, O(n), no regex over the
       whole document) + `XMLHighlighter` (tags/attrs/text); `Theme` with light/dark palettes reading system accent.
       Highlighting runs on a background task for bodies > 256 KB and is applied when ready; never blocks the main thread.
-- [ ] Pretty / Raw / Headers / Cookies segmented tabs. Pretty = `JSONPrettyPrinter` (preserves key order and
+- [x] Pretty / Raw / Headers / Cookies segmented tabs. Pretty = `JSONPrettyPrinter` (preserves key order and
       big-number precision: pretty-print via tokenizer, NOT via `JSONSerialization`) / `XMLPrettyPrinter`;
       falls back to Raw with a hint if the body isn't JSON/XML. Content type sniffed from header, then from bytes.
-- [ ] Preview tab: SwiftUI `WebView` (WebKit, macOS 26) rendering HTML bodies from a `WebPage` loaded with the
+- [x] Preview tab: SwiftUI `WebView` (WebKit, macOS 26) rendering HTML bodies from a `WebPage` loaded with the
       response bytes + base URL; JavaScript and network loads disabled by default (toggle in Settings), so a
       preview can't phone home. Images (`image/*`) render via `Image(nsImage:)`; PDFs via `PDFKit`.
-- [ ] Large-body policy from §5; binary → hex preview + Save.
-- [ ] Find bar with next/prev/count, wrap toggle, line numbers toggle, copy body, save body (`NSSavePanel`).
-- [ ] Timing popover; redirect chain list (each hop: status, URL) when redirects occurred.
-- [ ] Error card for transport failures with Retry.
-- [ ] Headers tab: table with copy-on-click; Cookies tab: name/value/domain/path/expires/flags.
+      *(`allowPreviewJavaScript` exists in settings and is honoured; its Settings-window toggle lands with
+      the rest of that window in Phase 12.)*
+- [x] Large-body policy from §5; binary → hex preview + Save.
+- [x] Find bar with next/prev/count, wrap toggle, line numbers toggle, copy body, save body (`NSSavePanel`).
+      *(The find bar is `NSTextView`'s own — same behaviour as every Mac app, see `docs/decisions.md` D21.)*
+- [x] Timing popover; redirect chain list (each hop: status, URL) when redirects occurred.
+- [x] Error card for transport failures with Retry.
+- [x] Headers tab: table with copy-on-click; Cookies tab: name/value/domain/path/expires/flags.
 - Acceptance: 20 MB JSON response (httpbin `/bytes` won't do; use `https://httpbin.org/stream/…` or a local
   python `http.server` serving a generated file — python3 is allowed for *testing* only) stays responsive: scroll,
   find, switch tabs without beachball; pretty-print of a 2 MB JSON completes < 1 s.
+  *(Both verified: `PostfrauCoreTests` pretty-prints 2.2 MB in ~0.6 s, and
+  `ResponseViewerTests.testALargeResponseStaysResponsive` drives a 22 MB response from a local
+  `python3 -m http.server` — it skips when that server is not running. Finding and fixing a 30 s
+  main-thread stall on that path is `docs/decisions.md` D20.)*
 
 ### Phase 6 — Collections management  ☐
 - [ ] Sidebar outline: create collection/folder/request (context menu + toolbar + shortcuts), rename inline,

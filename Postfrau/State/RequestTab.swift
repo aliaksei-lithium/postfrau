@@ -61,6 +61,8 @@ final class RequestTab: Identifiable {
 
     var selectedEditorTab: EditorTab = .params
     var selectedResponseTab: ResponseTab = .pretty
+    /// Bumped by ⌘F; the body view watches it and opens the system find bar.
+    var findRequests = 0
 
     init(
         id: UUID = UUID(),

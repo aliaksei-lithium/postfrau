@@ -73,7 +73,8 @@ struct BodyTab: View {
                 text: rawText,
                 isEditable: true,
                 fontSize: state.settings.editorFontSize,
-                wrapsLines: state.settings.wrapResponseLines,
+                wrapsLines: true,
+                tokens: requestBodyTokens,
                 accessibilityLabel: "Request body")
 
         case .urlEncoded:
@@ -90,6 +91,19 @@ struct BodyTab: View {
 
         case .binary:
             BinaryBodyPicker(tab: tab)
+        }
+    }
+
+    /// Highlighting for the body being edited. Request bodies are small enough to tokenize
+    /// inline; the response viewer, which deals in megabytes, does it off-main.
+    private var requestBodyTokens: [SyntaxToken] {
+        guard case .raw(let text, let language) = tab.draft.body,
+              text.utf16.count < JSONHighlighter.backgroundThreshold
+        else { return [] }
+        return switch language {
+        case .json: JSONHighlighter().tokens(in: text)
+        case .xml, .html: XMLHighlighter().tokens(in: text)
+        case .text, .javascript: []
         }
     }
 
