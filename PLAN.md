@@ -269,21 +269,21 @@ Deleting a variable or environment deletes its Keychain items.
 Each phase: implement → `make core-test` / `make test` green → run app and verify acceptance list →
 update checkboxes here → `git commit -m "Phase N: …"`. Never start phase N+1 with a red build.
 
-### Phase 0 — Bootstrap  ☐
-- [ ] `git init`, `.gitignore`, `LICENSE` (MIT), `README.md` (one paragraph + build instructions).
-- [ ] `Packages/PostfrauCore/Package.swift` with library + test target, Swift Testing. One trivial test.
-- [ ] `project.yml`: app target `Postfrau` (deployment target macOS 26.0, SwiftUI lifecycle, `SWIFT_VERSION=6`,
+### Phase 0 — Bootstrap  ☑
+- [x] `git init`, `.gitignore`, `LICENSE` (MIT), `README.md` (one paragraph + build instructions).
+- [x] `Packages/PostfrauCore/Package.swift` with library + test target, Swift Testing. One trivial test.
+- [x] `project.yml`: app target `Postfrau` (deployment target macOS 26.0, SwiftUI lifecycle, `SWIFT_VERSION=6`,
       `SWIFT_STRICT_CONCURRENCY=complete`, `SWIFT_DEFAULT_ACTOR_ISOLATION=MainActor`, `SWIFT_APPROACHABLE_CONCURRENCY=YES`,
       `SWIFT_UPCOMING_FEATURE_NONISOLATED_NONSENDING_BY_DEFAULT=YES`), depends on local package `PostfrauCore`, entitlements (sandbox + network client +
       user-selected files r/w), Info.plist with `LSMinimumSystemVersion`, `CFBundleDisplayName`, document
       types for `.json` import via drag (Phase 10), unit-test target `PostfrauTests`, UI-test target stub.
-- [ ] `Makefile`, `Scripts/bootstrap.sh`, `Scripts/screenshot.sh`
+- [x] `Makefile`, `Scripts/bootstrap.sh`, `Scripts/screenshot.sh`
       (`open` the app, `sleep 2`, `screencapture -l $(osascript … window id)` or simply `screencapture -x /tmp/postfrau.png` of the full screen; good enough for the agent to eyeball).
-- [ ] `PostfrauApp.swift` opens a window with placeholder three-pane layout and "Postfrau" text; confirm the
+- [x] `PostfrauApp.swift` opens a window with placeholder three-pane layout and "Postfrau" text; confirm the
       toolbar and sidebar render as Liquid Glass with no custom styling.
-- [ ] Placeholder `Postfrau.icon` created with Icon Composer (`/Applications/Xcode.app/Contents/Applications/Icon Composer.app`)
+- [x] Placeholder `Postfrau.icon` created with Icon Composer (`/Applications/Xcode.app/Contents/Applications/Icon Composer.app`)
       or a minimal hand-written `.icon` bundle; verify it shows in the Dock in light, dark, and clear modes.
-- [ ] `CLAUDE.md`: 15 lines max — build/test commands, "Core has no UI imports", "strict concurrency",
+- [x] `CLAUDE.md`: 15 lines max — build/test commands, "Core has no UI imports", "strict concurrency",
       "no third-party deps", "update PLAN.md checkboxes", "commit per phase".
 - Acceptance: `make gen && make test && make run` all succeed from a clean clone; window appears.
 
