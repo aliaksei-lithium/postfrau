@@ -128,3 +128,22 @@ extension AppState {
         }
     }
 }
+
+extension AppState {
+    /// The headers Postfrau would add to this request if it were sent right now.
+    ///
+    /// Built by running the real `RequestBuilder`, so the Headers tab can never drift from what
+    /// actually goes on the wire. A request that cannot be built yet (no URL) simply has none.
+    func automaticHeaders(for tab: RequestTab) -> [HeaderField] {
+        let built = try? RequestBuilder().build(
+            tab.draft, resolver: resolver(for: tab), effectiveAuth: effectiveAuth(for: tab).auth)
+        return built?.automaticHeaders ?? []
+    }
+
+    /// Everything that would go wrong with this request, for the Send button's tooltip.
+    func warnings(for tab: RequestTab) -> [String] {
+        let built = try? RequestBuilder().build(
+            tab.draft, resolver: resolver(for: tab), effectiveAuth: effectiveAuth(for: tab).auth)
+        return built?.warnings ?? []
+    }
+}

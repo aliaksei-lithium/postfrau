@@ -33,6 +33,22 @@ struct MainWindow: View {
         }
         .focusedSceneValue(\.appState, state)
         .onChange(of: urlFocusRequest) { _, _ in urlFieldFocused = true }
+        .confirmationDialog(
+            state.tabAwaitingCloseConfirmation.map {
+                "Save changes to “\($0.title)” before closing?"
+            } ?? "",
+            isPresented: Binding(
+                get: { state.tabAwaitingCloseConfirmation != nil },
+                set: { if !$0 { state.tabPendingCloseConfirmation = nil } })
+        ) {
+            Button("Save") { state.resolveCloseConfirmation(saving: true) }
+            Button("Don't Save", role: .destructive) {
+                state.resolveCloseConfirmation(saving: false)
+            }
+            Button("Cancel", role: .cancel) { state.tabPendingCloseConfirmation = nil }
+        } message: {
+            Text("Your changes will be lost if you don't save them.")
+        }
     }
 
     @ViewBuilder

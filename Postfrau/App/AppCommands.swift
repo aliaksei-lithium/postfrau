@@ -77,6 +77,8 @@ struct AppCommands: Commands {
             Button("Previous Tab") { state?.selectPreviousTab() }
                 .keyboardShortcut("[", modifiers: [.command, .shift])
                 .disabled(state == nil)
+            // The ⌘W here is the menu's label; `AppDelegate` intercepts the keystroke itself,
+            // because AppKit's File ▸ Close would otherwise win the key equivalent.
             Button("Close Tab") { state?.closeSelectedTab() }
                 .keyboardShortcut("w", modifiers: .command)
                 .disabled(state == nil)

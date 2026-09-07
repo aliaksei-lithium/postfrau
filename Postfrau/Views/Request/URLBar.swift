@@ -12,13 +12,23 @@ struct URLBar: View {
             MethodPicker(method: $tab.draft.method)
                 .onChange(of: tab.draft.method) { state.draftChanged(tab) }
 
-            TextField("Enter a URL", text: $tab.draft.url)
-                .textFieldStyle(.roundedBorder)
-                .font(.system(.body, design: .monospaced))
-                .focused($urlFieldFocused)
-                .onSubmit { state.send(tab) }
-                .onChange(of: tab.draft.url) { state.draftChanged(tab) }
-                .accessibilityLabel("Request URL")
+            TokenTextField(
+                text: Binding(get: { tab.draft.url }, set: { tab.urlEdited(to: $0) }),
+                fontSize: state.settings.editorFontSize,
+                placeholder: "Enter a URL",
+                resolver: state.resolver(for: tab),
+                onSubmit: { state.send(tab) },
+                onChange: { _ in state.draftChanged(tab) })
+            .frame(height: 26)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Color(nsColor: .textBackgroundColor)))
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(Color(nsColor: .separatorColor), lineWidth: 1))
+            .focused($urlFieldFocused)
+            .accessibilityLabel("Request URL")
+            .accessibilityValue(tab.draft.url)
 
             sendButton
         }
@@ -33,11 +43,23 @@ struct URLBar: View {
                 .keyboardShortcut(.cancelAction)
                 .accessibilityLabel("Cancel the request")
         } else {
+            let warnings = state.warnings(for: tab)
             Button("Send") { state.send(tab) }
                 .buttonStyle(.glassProminent)
                 .keyboardShortcut(.return, modifiers: .command)
                 .disabled(tab.draft.url.trimmingCharacters(in: .whitespaces).isEmpty)
+                .help(warnings.isEmpty ? "Send this request (⌘↩)" : warnings.joined(separator: "\n"))
+                .overlay(alignment: .topTrailing) {
+                    if !warnings.isEmpty {
+                        Circle()
+                            .fill(.orange)
+                            .frame(width: 7, height: 7)
+                            .offset(x: 3, y: -3)
+                            .accessibilityHidden(true)
+                    }
+                }
                 .accessibilityLabel("Send the request")
+                .accessibilityHint(warnings.joined(separator: ". "))
         }
     }
 }

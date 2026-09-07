@@ -1,0 +1,137 @@
+import SwiftUI
+import PostfrauCore
+
+/// The table used by Params, Headers, the urlencoded body and the variables editor.
+///
+/// Always shows one blank row to type into (`KeyValueRows.withTrailingBlank`), which is why dirty
+/// tracking compares *normalized* requests — see `RequestItem.normalized()`.
+struct KeyValueEditor: View {
+    @Binding var rows: [KeyValue]
+    var keyPrompt = "Key"
+    var valuePrompt = "Value"
+    var showsDescription = true
+    /// Suggestions for the key field, given what has been typed.
+    var keySuggestions: (String) -> [String] = { _ in [] }
+    /// Suggestions for the value field, given the row's key and what has been typed.
+    var valueSuggestions: (String, String) -> [String] = { _, _ in [] }
+    /// Called after any edit so `AppState` can mark the tab dirty.
+    var onChange: () -> Void = {}
+
+    @State private var hoveredRow: UUID?
+
+    var body: some View {
+        VStack(spacing: 0) {
+            headerRow
+            Divider()
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach($rows) { $row in
+                        rowView($row)
+                        Divider().opacity(0.4)
+                    }
+                }
+            }
+        }
+        .background(.background)
+        .onAppear { normalize() }
+    }
+
+    private var headerRow: some View {
+        HStack(spacing: 8) {
+            Color.clear.frame(width: 18)
+            Text(keyPrompt).frame(maxWidth: .infinity, alignment: .leading)
+            Text(valuePrompt).frame(maxWidth: .infinity, alignment: .leading)
+            if showsDescription {
+                Text("Description").frame(maxWidth: .infinity, alignment: .leading)
+            }
+            Color.clear.frame(width: 20)
+        }
+        .font(.caption.weight(.medium))
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .accessibilityHidden(true)
+    }
+
+    private func rowView(_ row: Binding<KeyValue>) -> some View {
+        let isBlank = row.wrappedValue.isEmpty
+
+        return HStack(spacing: 8) {
+            Toggle("", isOn: row.enabled)
+                .labelsHidden()
+                .toggleStyle(.checkbox)
+                .frame(width: 18)
+                // The blank row has nothing to enable yet.
+                .disabled(isBlank)
+                .opacity(isBlank ? 0.35 : 1)
+                .accessibilityLabel(
+                    row.wrappedValue.key.isEmpty
+                        ? "Enable this row" : "Enable \(row.wrappedValue.key)")
+                .onChange(of: row.wrappedValue.enabled) { commit() }
+
+            SuggestingTextField(
+                text: row.key, prompt: keyPrompt, suggestions: keySuggestions, onCommit: commit)
+            .frame(maxWidth: .infinity)
+            .accessibilityLabel("\(keyPrompt) name")
+            .onChange(of: row.wrappedValue.key) { commit() }
+
+            SuggestingTextField(
+                text: row.value, prompt: valuePrompt,
+                suggestions: { valueSuggestions(row.wrappedValue.key, $0) }, onCommit: commit)
+            .frame(maxWidth: .infinity)
+            .accessibilityLabel("\(keyPrompt) value")
+            .onChange(of: row.wrappedValue.value) { commit() }
+
+            if showsDescription {
+                TextField("Description", text: Binding(
+                    get: { row.wrappedValue.description ?? "" },
+                    set: { row.wrappedValue.description = $0.isEmpty ? nil : $0 }))
+                .textFieldStyle(.plain)
+                .frame(maxWidth: .infinity)
+                .accessibilityLabel("Description")
+                .onChange(of: row.wrappedValue.description) { commit() }
+            }
+
+            Button {
+                delete(row.wrappedValue.id)
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.tertiary)
+            }
+            .buttonStyle(.plain)
+            .frame(width: 20)
+            .opacity(hoveredRow == row.wrappedValue.id && !isBlank ? 1 : 0)
+            .disabled(isBlank)
+            .help("Delete this row")
+            .accessibilityLabel("Delete \(row.wrappedValue.key)")
+        }
+        .font(.callout)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 5)
+        .opacity(row.wrappedValue.enabled || isBlank ? 1 : 0.5)
+        .onHover { hoveredRow = $0 ? row.wrappedValue.id : nil }
+        // ⌘⌫ removes the row the cursor is in, matching the shortcut in §5.
+        .onKeyPress(keys: [.delete], phases: .down) { press in
+            guard press.modifiers.contains(.command), !isBlank else { return .ignored }
+            delete(row.wrappedValue.id)
+            return .handled
+        }
+    }
+
+    private func delete(_ id: UUID) {
+        rows.removeAll { $0.id == id }
+        normalize()
+        onChange()
+    }
+
+    private func commit() {
+        normalize()
+        onChange()
+    }
+
+    /// Keeps exactly one blank row at the end, without disturbing the row being edited.
+    private func normalize() {
+        let normalized = KeyValueRows.withTrailingBlank(rows)
+        if normalized != rows { rows = normalized }
+    }
+}

@@ -1,56 +1,56 @@
 # Postfrau — status
 
-**Current phase:** 4 (Request editor complete) — next
-**Last completed:** Phase 3 — App shell & first end-to-end send
-**Build:** green — `make test` passes: 193 Core tests (5.3 s), app unit tests, and 5 XCUITests that
+**Current phase:** 5 (Response viewer) — next
+**Last completed:** Phase 4 — Request editor complete
+**Build:** green — `make test` passes: 227 Core tests (~5 s), app unit tests, and 12 XCUITests that
 drive the real UI.
 
 > **Plan revision R3** (`PLAN.md`, 2026-09-07) added a `postfrau` CLI + Claude Code skill as
 > **Phase 11**, rewrote **Phase 8** (per-entry history files, recording levels, attribution), and
-> renumbered Polish & release to **Phase 12**. R3 also asked for the send pipeline to move into a
-> Core `Commands` layer during Phase 3; that phase was already built when the revision landed, so —
-> following the item's own instruction — the extraction happens at the start of Phase 11
+> renumbered Polish & release to **Phase 12**. The `Commands/SendRequest` extraction R3 wanted in
+> Phase 3 happens at the start of Phase 11, following that item's own instruction
 > (`docs/decisions.md` D11).
 
 ## What works
 
-**The app sends requests end to end.** Launch → pick a request from the sample collection → ⌘↩ →
-status, timing, size, pretty-ish body, headers and cookies. Cancel works mid-flight, tabs and
-window state come back after a relaunch.
+**The request composer is complete.** A POST with a JSON body, a bearer token and two query
+parameters against `httpbin.org/anything` comes back with everything echoed correctly, and a
+form-data file upload — picked through `NSOpenPanel`, stored as a security-scoped bookmark,
+streamed from disk — arrives with its contents intact. Both are XCUITests, not claims.
 
-- **Core** (Phases 1–2): full domain model, `WorkspaceStore` (atomic + file-coordinated writes,
-  revisions, own-write fingerprints), `VariableResolver`, `AuthResolver`, `Keychain`, `HistoryLog`,
-  `RequestBuilder` (every body mode), `HTTPExecutor` (per-profile sessions, TLS override, redirect
-  recording, metrics → timing, disk-streamed bodies, real cancellation).
-- **App**: `AppState` with debounced autosave driven by the macOS 26 `Observations` sequence;
-  `NavigationSplitView` shell with a persisted, draggable split; sidebar outline + history list;
-  custom tab bar (dirty dot, close, drag to reorder, ⌘T/⌘W/⌘⇧[/]); URL bar, method picker,
-  Send/Cancel with a progress bar; response pane with status pill, timing, size, body in an
-  `NSTextView`, headers and cookies tables; toolbar environment picker with a resolved-variable
-  quick-look; status bar; menu bar with the Phase 3 shortcuts; first-run sample collection.
-- **Verification**: the Phase 3 acceptance criteria are XCUITests, not eyeballing — launch,
-  open-from-sidebar-and-send, cancel a 10 s request, and restore tabs across a ⌘Q. A separate
-  `ScreenshotTests` captures the window in light and dark.
+- **Core** (Phases 1–2, plus Phase 4 additions): domain model, `WorkspaceStore`,
+  `VariableResolver`, `AuthResolver`, `Keychain`, `HistoryLog`, `RequestBuilder`, `HTTPExecutor`,
+  and now `JSONPrettyPrinter` (byte-level tokenizer: key order, duplicate keys and full number
+  precision survive; 2.2 MB in well under a second), `KeyValueRows`, `HeaderCatalog`.
+- **App**: everything from Phase 3, plus the full editor — `KeyValueEditor` with a trailing blank
+  row, hover-delete and ⌘⌫; Params mirrored two-way with the URL; Headers with name/value
+  autocomplete and a read-only "Postfrau will also send" section computed by the real builder;
+  the Auth tab (Inherit / None / Basic / Bearer / API Key) with reveal toggles and an on-the-wire
+  preview; every body mode with a JSON Beautify button and file pickers; a `TokenTextField` URL bar
+  that colours `{{variables}}` green or red and explains them on hover; dirty tracking with a
+  Save / Don't Save / Cancel prompt; inline rename from the tab and the sidebar.
 
 ## Next
 
-Phase 4: `KeyValueEditor`, params ↔ URL two-way sync, headers with autocomplete and an
-"auto headers" section, the full Auth tab, all body modes, the `TokenTextField` URL bar with
-`{{variable}}` colouring, dirty-tab save prompts, and inline rename.
+Phase 5: the response viewer — `JSONHighlighter` / `XMLHighlighter`, Pretty / Raw / Preview tabs
+(SwiftUI `WebView` with JavaScript off), the large-body policy, find bar, timing popover, redirect
+chain, and the hex view for binary responses.
 
 ## Known issues / limitations
 
-- Params / Headers / Auth tabs are read-only placeholders until Phase 4; the raw JSON body editor
-  works. The response body is not syntax-highlighted or pretty-printed yet (Phase 5).
-- Sidebar is read-only — no create/rename/delete/drag (Phase 6).
-- `URLSession` leaves occasional `CFNetworkDownload_*.tmp` files in the container's tmp when a
+- The response body is not syntax-highlighted or pretty-printed yet (Phase 5).
+- Sidebar is read-only — no create/delete/drag; only rename (Phase 6).
+- No environments editor yet (Phase 7): variables can be read but not edited in the UI.
+- `URLSession` occasionally leaves a `CFNetworkDownload_*.tmp` in the container's tmp when a
   download is cancelled. Postfrau's own spill files are cleaned up; these are the framework's.
 - App icon is a placeholder mark (Phase 12). Hardened runtime is off in the generated project and
   enabled only by `Scripts/release.sh` (`docs/decisions.md` D3).
 
 ## Decisions taken
 
-`docs/decisions.md` D1–D15. Most consequential: D5 model type renames · D9 `download(for:)` instead
-of `bytes(for:)` (measured ~40x faster on large bodies) · D11 `Commands` extraction deferred to
-Phase 11 · D12 the three launch overrides and why each is needed · D13 four accessibility defects
-that only driving the real UI could find · D14 quit-time flush.
+`docs/decisions.md` D1–D18. Most consequential: D5 model type renames · D9 `download(for:)` instead
+of `bytes(for:)` (~40x faster on large bodies) · D11 `Commands` extraction deferred to Phase 11 ·
+D13 four accessibility defects only driving the real UI could find · D16 pretty printer built a
+phase early · D17 blank editor rows normalized out of dirty tracking · D18 ⌘W intercepted with a
+key monitor, because SwiftUI reverts menu edits and a `Window` scene quits when its last window
+closes.

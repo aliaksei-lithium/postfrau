@@ -63,18 +63,49 @@ struct RequestRow: View {
     @Environment(AppState.self) private var state
     var request: RequestItem
 
+    @State private var isRenaming = false
+    @State private var draftName = ""
+    @FocusState private var renameFocused: Bool
+
     var body: some View {
         HStack(spacing: 6) {
             MethodBadge(method: request.method).accessibilityHidden(true)
-            Text(request.name).lineLimit(1)
+            if isRenaming {
+                TextField("Name", text: $draftName)
+                    .textFieldStyle(.plain)
+                    .focused($renameFocused)
+                    .onSubmit(commitRename)
+                    .onExitCommand { isRenaming = false }
+                    .onChange(of: renameFocused) { _, focused in if !focused { commitRename() } }
+                    .accessibilityLabel("Rename \(request.name)")
+            } else {
+                Text(request.name).lineLimit(1)
+            }
         }
         // `.ignore` plus an explicit label: the row is one element that reads "GET List", rather
-        // than two unnamed fragments that VoiceOver cannot make sense of.
-        .accessibilityElement(children: .ignore)
+        // than two unnamed fragments that VoiceOver cannot make sense of. While renaming, the
+        // field itself has to stay reachable.
+        .accessibilityElement(children: isRenaming ? .contain : .ignore)
         .accessibilityLabel("\(request.method.rawValue) \(request.name)")
         .accessibilityAddTraits(.isButton)
         .contentShape(.rect)
         .onTapGesture(count: 2) { state.openRequest(id: request.id) }
+        .contextMenu {
+            Button("Open") { state.openRequest(id: request.id) }
+            Button("Rename…") { beginRename() }
+        }
         .tag(request.id)
+    }
+
+    private func beginRename() {
+        draftName = request.name
+        isRenaming = true
+        renameFocused = true
+    }
+
+    private func commitRename() {
+        guard isRenaming else { return }
+        isRenaming = false
+        state.renameRequest(id: request.id, to: draftName)
     }
 }

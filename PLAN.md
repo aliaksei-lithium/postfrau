@@ -375,22 +375,26 @@ update checkboxes here → `git commit -m "Phase N: …"`. Never start phase N+1
   rather than by eye. The sample request is named "Echo query"; `ScreenshotTests` captures the window
   in light and dark for review.)*
 
-### Phase 4 — Request editor complete  ☐
-- [ ] `KeyValueEditor` component per §5 (used by Params, Headers, urlencoded body, form-data, variables).
-- [ ] Params tab ↔ URL two-way sync (§3 rule), with tests in Core for the parse/compose function.
-- [ ] Headers tab with autocomplete; computed "auto headers" section (greyed, non-editable) showing what
+### Phase 4 — Request editor complete  ☑
+- [x] `KeyValueEditor` component per §5 (used by Params, Headers, urlencoded body, form-data, variables).
+- [x] Params tab ↔ URL two-way sync (§3 rule), with tests in Core for the parse/compose function.
+- [x] Headers tab with autocomplete; computed "auto headers" section (greyed, non-editable) showing what
       Postfrau will add (Content-Type, Authorization from auth helper, User-Agent, Content-Length).
-- [ ] Auth tab: Inherit (shows the effective inherited auth read-only), None, Basic, Bearer, API Key.
+- [x] Auth tab: Inherit (shows the effective inherited auth read-only), None, Basic, Bearer, API Key.
       Secret-ish fields use `SecureField` with reveal toggle.
-- [ ] Body tab: all modes; raw editor is `CodeTextView` editable with JSON/XML highlighting (Phase 5's
+- [x] Body tab: all modes; raw editor is `CodeTextView` editable with JSON/XML highlighting (Phase 5's
       highlighter—stub it now, real one next phase), language picker, Beautify (JSON), file picker for
       binary and form-data files with security-scoped bookmarks.
-- [ ] Settings tab: follow redirects, max redirects, timeout, verify TLS, send cookies, encode URL.
-- [ ] `TokenTextField` URL bar with `{{var}}` coloring and hover-to-resolve; ⌘L focuses it.
-- [ ] Dirty tracking: draft vs saved copy diff; ⌘S saves; closing a dirty tab prompts Save / Don't Save / Cancel.
-- [ ] Rename request inline from tab (double-click) and from sidebar.
+      *(Beautify needed a real pretty printer, so `JSONPrettyPrinter` was written here rather than in
+      Phase 5 — same component, earlier. See `docs/decisions.md` D16.)*
+- [x] Settings tab: follow redirects, max redirects, timeout, verify TLS, send cookies, encode URL.
+- [x] `TokenTextField` URL bar with `{{var}}` coloring and hover-to-resolve; ⌘L focuses it.
+- [x] Dirty tracking: draft vs saved copy diff; ⌘S saves; closing a dirty tab prompts Save / Don't Save / Cancel.
+- [x] Rename request inline from tab (double-click) and from sidebar.
 - Acceptance: build a POST with JSON body + bearer token + 2 params against httpbin `/anything`, response
   echoes everything correctly; form-data with a file upload echoes file name; changing params rewrites URL and vice-versa.
+  *(All three are XCUITests in `PostfrauUITests/RequestEditorTests`, driven through the real UI — the file
+  upload really does go through `NSOpenPanel` and a security-scoped bookmark.)*
 
 ### Phase 5 — Response viewer  ☐
 - [ ] `SyntaxHighlighter` protocol + `JSONHighlighter` (hand-written tokenizer, O(n), no regex over the

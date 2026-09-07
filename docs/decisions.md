@@ -164,3 +164,36 @@ quit path and what a user does.
 the expansion set wholesale, so installing first meant the sample always appeared collapsed on
 first run. The order in `AppState.load` is now: load workspace → restore UI state → install the
 sample if there are no collections.
+
+## D16 — `JSONPrettyPrinter` built in Phase 4, not Phase 5
+
+**Phase 4.** `PLAN.md` lists the pretty printer under Phase 5, but Phase 4's Body tab needs a
+"Beautify" button, so it was written a phase early. It is the same component Phase 5's Pretty tab
+will use — no duplication, just ordering. It is a byte-level tokenizer rather than a
+`JSONSerialization` round-trip because Foundation reorders object keys, collapses duplicates, and
+rewrites numbers through `Double`: `9007199254740993` comes back as `…992`, `1.0` as `1`. Tests
+assert on exactly those cases. A 2.2 MB document re-indents in well under the 1 s the plan sets.
+
+## D17 — Blank editor rows live in the model; dirty tracking normalizes them away
+
+**Phase 4.** Every key/value table shows a trailing blank row to type into, and the simplest place
+for that row is the model itself (a parallel "display" array has to be kept in sync on every
+keystroke). The consequence is that merely *opening* the Params tab would change the draft and
+light up the unsaved-changes dot. `RequestItem.normalized()` strips blank rows, `isDirty` compares
+normalized drafts, and `saveTab` writes the normalized form — so the scaffolding never reaches disk
+and never looks like an edit. `KeyValueRows` holds the rules, with tests.
+
+## D18 — ⌘W is intercepted with a local key monitor
+
+**Phase 4.** §5 assigns ⌘W to "close tab". A SwiftUI `Window` scene always gets a File ▸ Close item
+on ⌘W, and when two menu items share a key equivalent AppKit picks the system one — so ⌘W closed
+the window, and since a `Window` scene quits when its last window closes, the app appeared to
+crash. Retargeting the menu item's key equivalent does not stick: it applies (verified) and SwiftUI
+then rebuilds the menu and reverts it. `NSEvent.addLocalMonitorForEvents` runs before menu
+dispatch, so that is where the decision is made; the menu item keeps ⌘W as its label.
+
+Two related fixes came out of the same investigation: `applicationShouldTerminateAfterLastWindowClosed`
+now returns false (closing the window should not quit a single-window app — Phase 12 wants ⌘N to
+bring it back), and the unsaved-changes confirmation moved from the tab row to the window. A
+`confirmationDialog` presented by the very view that is about to be removed is a crash waiting to
+happen; the window outlives every tab.

@@ -70,9 +70,14 @@ extension AppState {
         markUIStateDirty()
     }
 
+    /// Set by ⌘W when the selected tab has unsaved work; the tab bar shows the dialog.
     func closeSelectedTab() {
         guard let selectedTab else { return }
-        closeTab(selectedTab)
+        if closingLosesWork(selectedTab) {
+            tabPendingCloseConfirmation = selectedTab.id
+        } else {
+            closeTab(selectedTab)
+        }
     }
 
     func closeOtherTabs(keeping tab: RequestTab) {
@@ -122,11 +127,63 @@ extension AppState {
               let index = workspace.collections.firstIndex(where: { $0.id == collectionID })
         else { return false }
 
-        guard workspace.collections[index].replace(.request(tab.draft)) else { return false }
+        // The blank editor rows are scaffolding, not data; they never reach the collection.
+        guard workspace.collections[index].replace(.request(tab.savableDraft)) else { return false }
         tab.markSaved()
         markDirty(collection: collectionID)
         markUIStateDirty()
         return true
+    }
+
+    /// The tab the close confirmation is about, if one is pending.
+    var tabAwaitingCloseConfirmation: RequestTab? {
+        tabPendingCloseConfirmation.flatMap { id in tabs.first { $0.id == id } }
+    }
+
+    /// Answers the pending close confirmation.
+    func resolveCloseConfirmation(saving: Bool) {
+        guard let tab = tabAwaitingCloseConfirmation else { return }
+        tabPendingCloseConfirmation = nil
+        if saving { saveTab(tab) }
+        closeTab(tab)
+    }
+
+    /// True when closing this tab would throw away work the user could still save.
+    func closingLosesWork(_ tab: RequestTab) -> Bool {
+        tab.isDirty && tab.requestID != nil && !tab.isFromHistory
+    }
+
+    /// Renames a request everywhere at once: the open tab and the collection it lives in.
+    func rename(_ tab: RequestTab, to newName: String) {
+        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != tab.draft.name else { return }
+        tab.draft.name = trimmed
+        if tab.requestID != nil, tab.collectionID != nil {
+            saveTab(tab)
+        } else {
+            markUIStateDirty()
+        }
+    }
+
+    /// Renames a saved request from the sidebar, updating any tab that has it open.
+    func renameRequest(id requestID: UUID, to newName: String) {
+        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              let collectionIndex = workspace.collections.firstIndex(
+                where: { $0.item(withID: requestID) != nil }),
+              var request = workspace.collections[collectionIndex].request(withID: requestID),
+              request.name != trimmed
+        else { return }
+
+        request.name = trimmed
+        workspace.collections[collectionIndex].replace(.request(request))
+        markDirty(collection: workspace.collections[collectionIndex].id)
+
+        for tab in tabs where tab.requestID == requestID {
+            tab.draft.name = trimmed
+            tab.savedSnapshot.name = trimmed
+        }
+        markUIStateDirty()
     }
 
     /// Called whenever the editor changes the draft.

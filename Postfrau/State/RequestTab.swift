@@ -77,7 +77,37 @@ final class RequestTab: Identifiable {
         self.isFromHistory = isFromHistory
     }
 
-    var isDirty: Bool { draft != savedSnapshot }
+    /// Compares *normalized* requests, so the blank row every key/value table shows does not by
+    /// itself count as an unsaved change.
+    var isDirty: Bool { draft.normalized() != savedSnapshot.normalized() }
+
+    /// Guards the URL ↔ params mirror against feeding itself.
+    @ObservationIgnored private var isSyncingQuery = false
+
+    /// The URL text changed: re-derive the params table from its query.
+    ///
+    /// `PLAN.md` §3 — the URL owns the path, the params table owns the query, and editing either
+    /// re-derives the other. The URL field keeps showing the whole URL, query included; the table
+    /// mirrors it.
+    func urlEdited(to text: String) {
+        draft.url = text
+        guard !isSyncingQuery else { return }
+        isSyncingQuery = true
+        defer { isSyncingQuery = false }
+        let (_, params) = URLQuery.merge(urlText: text, into: draft.params)
+        draft.params = KeyValueRows.withTrailingBlank(params)
+    }
+
+    /// The params table changed: rewrite the URL's query from it.
+    func paramsEdited() {
+        guard !isSyncingQuery else { return }
+        isSyncingQuery = true
+        defer { isSyncingQuery = false }
+        draft.url = URLQuery.compose(
+            base: draft.url,
+            params: KeyValueRows.stripped(draft.params),
+            encode: draft.settings.encodeURL)
+    }
 
     /// What the tab bar shows.
     var title: String {
@@ -104,6 +134,9 @@ final class RequestTab: Identifiable {
     func markSaved() {
         savedSnapshot = draft
     }
+
+    /// The draft with editor scaffolding removed — what gets written to a collection.
+    var savableDraft: RequestItem { draft.normalized() }
 
     /// The persisted form of this tab.
     func snapshot() -> TabState {

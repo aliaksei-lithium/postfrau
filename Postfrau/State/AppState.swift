@@ -42,6 +42,9 @@ final class AppState {
     var historyEntries: [HistoryEntry] = []
     /// Bumped by ⌘L; the window watches it and moves focus into the URL field.
     private(set) var urlFocusRequests = 0
+    /// Set when a menu command wants to close a tab that has unsaved work; the tab bar owns the
+    /// dialog, so the command hands the decision over rather than presenting one itself.
+    var tabPendingCloseConfirmation: UUID?
 
     func focusURLField() { urlFocusRequests += 1 }
 

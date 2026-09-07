@@ -55,18 +55,32 @@ struct TabBar: View {
 
 struct TabItem: View {
     @Environment(AppState.self) private var state
-    var tab: RequestTab
+    @Bindable var tab: RequestTab
     var isSelected: Bool
 
     @State private var isHovering = false
+    @State private var isRenaming = false
+    @State private var draftName = ""
+    @FocusState private var renameFocused: Bool
 
     var body: some View {
         HStack(spacing: 6) {
             MethodBadge(method: tab.draft.method, size: 9)
-            Text(tab.title)
-                .font(.callout)
-                .lineLimit(1)
-                .truncationMode(.middle)
+            if isRenaming {
+                TextField("Name", text: $draftName)
+                    .textFieldStyle(.plain)
+                    .font(.callout)
+                    .focused($renameFocused)
+                    .onSubmit(commitRename)
+                    .onExitCommand { isRenaming = false }
+                    .onChange(of: renameFocused) { _, focused in if !focused { commitRename() } }
+                    .accessibilityLabel("Rename request")
+            } else {
+                Text(tab.title)
+                    .font(.callout)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
 
             closeAffordance
         }
@@ -79,26 +93,40 @@ struct TabItem: View {
         }
         .contentShape(.rect)
         .onTapGesture { state.selectedTabID = tab.id; state.markUIStateDirty() }
+        .onTapGesture(count: 2) { beginRename() }
         .onHover { isHovering = $0 }
         .help(tab.draft.url.isEmpty ? tab.title : tab.draft.url)
         .contextMenu {
-            Button("Close Tab") { state.closeTab(tab) }
+            Button("Rename…") { beginRename() }
+            Divider()
+            Button("Close Tab") { requestClose() }
             Button("Close Other Tabs") { state.closeOtherTabs(keeping: tab) }
-        }
-        .draggable(tab.id.uuidString) {
-            Text(tab.title).padding(6)
-        }
-        .dropDestination(for: String.self) { items, _ in
-            guard let raw = items.first, let draggedID = UUID(uuidString: raw),
-                  let from = state.tabs.firstIndex(where: { $0.id == draggedID }),
-                  let to = state.tabs.firstIndex(where: { $0.id == tab.id })
-            else { return false }
-            state.moveTab(from: from, to: to > from ? to + 1 : to)
-            return true
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(tab.title)\(tab.isDirty ? ", unsaved changes" : "")")
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+    }
+
+    /// Closing a tab with unsaved work asks first. The dialog belongs to the window, not to this
+    /// row: presenting it from a view that is about to be removed is a good way to crash.
+    private func requestClose() {
+        if state.closingLosesWork(tab) {
+            state.tabPendingCloseConfirmation = tab.id
+        } else {
+            state.closeTab(tab)
+        }
+    }
+
+    private func beginRename() {
+        draftName = tab.draft.name
+        isRenaming = true
+        renameFocused = true
+    }
+
+    private func commitRename() {
+        guard isRenaming else { return }
+        isRenaming = false
+        state.rename(tab, to: draftName)
     }
 
     /// The dirty dot turns into a close button on hover — the pattern every Mac editor uses.
@@ -106,7 +134,7 @@ struct TabItem: View {
     private var closeAffordance: some View {
         if isHovering {
             Button {
-                state.closeTab(tab)
+                requestClose()
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 8, weight: .bold))
