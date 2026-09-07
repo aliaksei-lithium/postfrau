@@ -127,3 +127,8 @@ struct AppCommands: Commands {
         #endif
     }
 }
+
+/// The identifier of the environments window, shared by the scene and the menu command.
+enum EnvironmentsWindowID {
+    static let value = "environments"
+}

@@ -24,7 +24,7 @@ struct RequestEditor: View {
 
             Picker("Request section", selection: $tab.selectedEditorTab) {
                 ForEach(EditorTab.allCases) { editorTab in
-                    Text(label(for: editorTab)).tag(editorTab)
+                    Text(label(for: editorTab, unresolved: unresolved)).tag(editorTab)
                 }
             }
             .pickerStyle(.segmented)
@@ -40,19 +40,28 @@ struct RequestEditor: View {
         .background(.background)
     }
 
-    /// Counts and dots on the segment labels, the way Postman shows them.
-    private func label(for editorTab: EditorTab) -> String {
+    /// Unresolved variables anywhere in this request, counted once per body evaluation.
+    private var unresolved: AppState.UnresolvedCounts {
+        state.unresolvedCounts(for: tab)
+    }
+
+    /// Counts and dots on the segment labels, the way Postman shows them. A section holding an
+    /// unresolved `{{variable}}` is marked, since the tables themselves are not coloured (§5).
+    private func label(for editorTab: EditorTab, unresolved: AppState.UnresolvedCounts) -> String {
         switch editorTab {
         case .params:
             let count = tab.draft.params.active.count
-            return count > 0 ? "Params (\(count))" : "Params"
+            let base = count > 0 ? "Params (\(count))" : "Params"
+            return unresolved.params > 0 ? "\(base) ⚠" : base
         case .headers:
             let count = tab.draft.headers.active.count
-            return count > 0 ? "Headers (\(count))" : "Headers"
+            let base = count > 0 ? "Headers (\(count))" : "Headers"
+            return unresolved.headers > 0 ? "\(base) ⚠" : base
         case .auth:
             return tab.draft.auth == .inherit || tab.draft.auth == .none ? "Auth" : "Auth •"
         case .body:
-            return tab.draft.body.isEffectivelyEmpty ? "Body" : "Body •"
+            let base = tab.draft.body.isEffectivelyEmpty ? "Body" : "Body •"
+            return unresolved.body > 0 ? "\(base) ⚠" : base
         case .settings:
             return "Settings"
         }

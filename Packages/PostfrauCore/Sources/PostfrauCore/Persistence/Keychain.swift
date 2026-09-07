@@ -20,17 +20,33 @@ public struct Keychain: Sendable {
         self.synchronizable = synchronizable
     }
 
-    public enum KeychainError: Error, LocalizedError {
+    public enum KeychainError: Error, LocalizedError, Equatable {
         case unexpectedStatus(OSStatus)
         case interactionNotAllowed
+        /// The system refused the item because the build is not signed for it. iCloud Keychain
+        /// (`kSecAttrSynchronizable`) needs a real signing identity; an ad-hoc build cannot store
+        /// synchronizable items at all.
+        case missingEntitlement
 
         public var errorDescription: String? {
             switch self {
             case .interactionNotAllowed:
                 "The keychain is locked."
+            case .missingEntitlement:
+                "This build cannot use iCloud Keychain. Syncing secrets needs a signed build "
+                    + "with a Keychain access group; secrets stay on this Mac."
             case .unexpectedStatus(let status):
                 SecCopyErrorMessageString(status, nil) as String?
                     ?? "Keychain error \(status)."
+            }
+        }
+
+        /// Maps an `OSStatus` to the case that says the most about it.
+        static func from(_ status: OSStatus) -> KeychainError {
+            switch status {
+            case errSecInteractionNotAllowed: .interactionNotAllowed
+            case errSecMissingEntitlement: .missingEntitlement
+            default: .unexpectedStatus(status)
             }
         }
     }
@@ -56,10 +72,8 @@ public struct Keychain: Sendable {
             return String(data: data, encoding: .utf8)
         case errSecItemNotFound:
             return nil
-        case errSecInteractionNotAllowed:
-            throw KeychainError.interactionNotAllowed
         default:
-            throw KeychainError.unexpectedStatus(status)
+            throw KeychainError.from(status)
         }
     }
 
@@ -71,19 +85,13 @@ public struct Keychain: Sendable {
             query as CFDictionary,
             [kSecValueData as String: data] as CFDictionary)
         if updateStatus == errSecSuccess { return }
-        if updateStatus != errSecItemNotFound {
-            if updateStatus == errSecInteractionNotAllowed { throw KeychainError.interactionNotAllowed }
-            throw KeychainError.unexpectedStatus(updateStatus)
-        }
+        if updateStatus != errSecItemNotFound { throw KeychainError.from(updateStatus) }
 
         var insert = query
         insert[kSecValueData as String] = data
         insert[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
         let addStatus = SecItemAdd(insert as CFDictionary, nil)
-        guard addStatus == errSecSuccess else {
-            if addStatus == errSecInteractionNotAllowed { throw KeychainError.interactionNotAllowed }
-            throw KeychainError.unexpectedStatus(addStatus)
-        }
+        guard addStatus == errSecSuccess else { throw KeychainError.from(addStatus) }
     }
 
     public func delete(_ account: String) throws {

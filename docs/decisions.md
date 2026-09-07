@@ -289,3 +289,28 @@ The enabled test for each item runs inside a small `CommandButton` view rather t
 `commands` builder. Reading `@Observable` state directly in that builder makes the whole Scene —
 the window included — a dependency of the state, so every edit tears the window down and rebuilds
 it.
+
+## D26 — iCloud Keychain needs a signed build; the app says so instead of failing silently
+
+**Phase 7.** `PLAN.md` Phase 9 asked for a finding on this, and it arrived early: writing a
+`kSecAttrSynchronizable` item from this ad-hoc-signed build returns `errSecMissingEntitlement`
+(-34018). iCloud Keychain requires a real signing identity with a Keychain access group, which
+needs the paid Developer Program this project does not have.
+
+`Keychain.KeychainError` gained a `.missingEntitlement` case whose message says exactly that, and
+`SecretsStore.setSynchronizable` writes to the destination store *before* deleting from the
+source — so a refused move leaves every secret where it was and the setting flips back rather than
+claiming a sync that is not happening. The test asserts that behaviour instead of asserting a
+successful move, since the successful path cannot run on an unsigned build.
+
+Local (non-synchronizable) Keychain storage works fully, which is what every other Phase 7
+criterion depends on.
+
+## D27 — `ImageRenderer` cannot stand in for a screenshot of these views
+
+**Phase 7.** With the display occupied (D22), rendering views to PNGs with `ImageRenderer` looked
+like a way to keep eyeballing the UI. It is not: `NavigationSplitView` and `List` render as a
+"not supported" placeholder, because they need a real window to host. The attempt was removed
+rather than kept as a test that passes while producing a meaningless image.
+`Scripts/screenshot.sh` (capture by window id, `.optionAll`) remains the way to look at the app,
+and it works for any window that has actually been displayed.

@@ -58,6 +58,8 @@ final class AppState {
     /// Set when a menu command wants to close a tab that has unsaved work; the tab bar owns the
     /// dialog, so the command hands the decision over rather than presenting one itself.
     var tabPendingCloseConfirmation: UUID?
+    /// The last Keychain problem, shown in the environments window. Nil when all is well.
+    var secretsError: String?
     /// Whether the ⌘K panel is showing, and what has been typed into it.
     ///
     /// The query lives here rather than in the panel's own `@State` because the panel is presented
@@ -95,6 +97,8 @@ final class AppState {
     let store: WorkspaceStore
     let historyLog: HistoryLog
     let executor: HTTPExecutor
+    /// Secret variable values. Kept out of the data folder entirely — see `SecretsStore`.
+    let secretsStore: SecretsStore
     private let builder = RequestBuilder()
 
     // MARK: Dirty tracking
@@ -104,7 +108,7 @@ final class AppState {
     private var dirtyCollectionIDs: Set<UUID> = []
     private var dirtyEnvironmentIDs: Set<UUID> = []
     var deletedCollectionIDs: Set<UUID> = []
-    private var deletedEnvironmentIDs: Set<UUID> = []
+    var deletedEnvironmentIDs: Set<UUID> = []
     private var globalsDirty = false
     private var settingsDirty = false
     private var uiStateDirty = false
@@ -117,11 +121,13 @@ final class AppState {
     init(
         store: WorkspaceStore,
         historyLog: HistoryLog,
-        executor: HTTPExecutor = HTTPExecutor()
+        executor: HTTPExecutor = HTTPExecutor(),
+        secretsStore: SecretsStore = SecretsStore()
     ) {
         self.store = store
         self.historyLog = historyLog
         self.executor = executor
+        self.secretsStore = secretsStore
     }
 
     /// Builds the state the app actually runs with: the container's local root and the data
@@ -198,6 +204,8 @@ final class AppState {
         // The UI state is restored *before* the sample collection is installed: `restore` replaces
         // the expansion set wholesale, so installing first would silently discard the sample's
         // "start expanded" flag.
+        await loadSecrets()
+
         let uiState = await store.loadUIState()
         restore(uiState)
 

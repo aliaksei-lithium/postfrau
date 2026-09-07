@@ -445,17 +445,24 @@ update checkboxes here → `git commit -m "Phase N: …"`. Never start phase N+1
   partway through, which stops every click-based test from running at all. See
   `docs/decisions.md` D22 and D24; re-run with `make ui-test` on a free desktop.)*
 
-### Phase 7 — Environments, globals, secrets  ☐
-- [ ] Environments window (⌘E): list on the left (add, duplicate, delete, rename), variables editor on the
+### Phase 7 — Environments, globals, secrets  ☑
+- [x] Environments window (⌘E): list on the left (add, duplicate, delete, rename), variables editor on the
       right (key, value, enabled, secret toggle); Globals as a pinned first entry.
-- [ ] Secret variables: value stored in Keychain, masked in UI with reveal, never written to JSON, excluded
+- [x] Secret variables: value stored in Keychain, masked in UI with reveal, never written to JSON, excluded
       from export unless user checks "include secrets" (warning shown).
-- [ ] Toolbar picker + quick-look popover of resolved values; unresolved-variable warning badge on the
+      *(Storage, masking and the JSON blanking are done and tested. The export opt-in belongs to the export
+      UI, which is Phase 10; `Variable.encode` already blanks secrets, so export inherits that by default.)*
+- [x] Toolbar picker + quick-look popover of resolved values; unresolved-variable warning badge on the
       Send button tooltip listing names; red tokens in URL bar / headers / body (body: only in the gutter
       or via a count badge—don't slow the editor).
-- [ ] Variables inherited from collection/folder visible in the popover with their source labeled.
+- [x] Variables inherited from collection/folder visible in the popover with their source labeled.
 - Acceptance: request using `{{baseUrl}}` switches target when env changes; secret token shows as ••• and
   is sent correctly; relaunch keeps secrets (Keychain), JSON on disk has empty value.
+  *(All three are tests in `PostfrauTests/EnvironmentTests`, plus `SecretsStoreTests` in Core — including
+  that a deleted or renamed secret leaves nothing behind in the Keychain. The environments window itself
+  has not been eyeballed yet: the machine's display is held by a full-screen Space, see
+  `docs/decisions.md` D22 and D27. iCloud Keychain sync cannot work on an unsigned build and now says so
+  rather than failing quietly — D26.)*
 
 ### Phase 8 — History  ☐
 - [ ] `HistoryStore` (replaces `HistoryLog`): one JSON file per entry under `history/<day>/`, append = write one

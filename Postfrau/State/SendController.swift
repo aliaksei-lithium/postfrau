@@ -203,3 +203,51 @@ extension AppState {
             globals: workspace.globals))
     }
 }
+
+extension AppState {
+    /// Unresolved `{{variable}}` names, per section of the request editor.
+    ///
+    /// The URL bar colours its own tokens; the key/value tables and the body editor would be slow
+    /// to colour per character, so §5's fallback applies — a count on the section's tab, with the
+    /// names in the Send button's tooltip.
+    struct UnresolvedCounts {
+        var url = 0
+        var params = 0
+        var headers = 0
+        var body = 0
+
+        var total: Int { url + params + headers + body }
+    }
+
+    func unresolvedCounts(for tab: RequestTab) -> UnresolvedCounts {
+        let resolver = resolver(for: tab)
+        var counts = UnresolvedCounts()
+        var seen: Set<String> = []
+
+        func count(_ text: String) -> Int {
+            var found = 0
+            for name in resolver.resolve(text).unresolved where seen.insert(name).inserted {
+                found += 1
+            }
+            return found
+        }
+
+        counts.url = count(tab.draft.url)
+        for row in tab.draft.params.active { counts.params += count(row.key) + count(row.value) }
+        for row in tab.draft.headers.active { counts.headers += count(row.key) + count(row.value) }
+        switch tab.draft.body {
+        case .raw(let text, _):
+            counts.body = count(text)
+        case .urlEncoded(let rows):
+            for row in rows.active { counts.body += count(row.key) + count(row.value) }
+        case .formData(let fields):
+            for field in fields where field.enabled {
+                counts.body += count(field.key)
+                if case .text(let value) = field.value { counts.body += count(value) }
+            }
+        case .none, .binary:
+            break
+        }
+        return counts
+    }
+}
