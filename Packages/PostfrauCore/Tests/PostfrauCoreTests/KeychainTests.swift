@@ -13,15 +13,10 @@ struct KeychainTests {
     }
 
     /// True when this machine lets us write to the keychain at all.
-    private func isUsable(_ store: Keychain) -> Bool {
-        do {
-            try store.set("probe", for: "probe")
-            try store.delete("probe")
-            return true
-        } catch {
-            return false
-        }
-    }
+    ///
+    /// Answered by `KeychainProbe`, which puts a deadline on the question: a keychain that needs
+    /// an authorization nobody can give blocks in `SecItemAdd` rather than failing.
+    private func isUsable(_ store: Keychain) -> Bool { KeychainProbe.isKeychainUsable }
 
     /// Marks a test as skipped-because-the-environment-cannot-run-it, without failing the suite.
     private func skipUnavailable() {

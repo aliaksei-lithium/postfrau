@@ -51,7 +51,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         bringMainWindowForward()
     }
 
-    private func bringMainWindowForward() {
+    func bringMainWindowForward() {
         guard let window = NSApp.windows.first(where: { $0.canBecomeMain }) else { return }
         window.makeKeyAndOrderFront(nil)
     }

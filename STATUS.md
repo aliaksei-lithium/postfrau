@@ -1,8 +1,8 @@
 # Postfrau — status
 
-**Current phase:** 11 (CLI & agent interface) — next
-**Last completed:** Phase 10 — Import / Export
-**Build:** green — `make test` passes: 426 Core tests (~6 s) plus 47 app unit tests.
+**Current phase:** 12 (Polish & release) — next
+**Last completed:** Phase 11 — CLI & agent interface
+**Build:** green — `make test` passes: 491 Core tests (~8 s) plus the app unit tests.
 `make live-test` runs the ones that talk to the real network.
 
 > **UI tests need a free, awake desktop.** `make ui-test` runs the XCUITest suite separately,
@@ -48,7 +48,17 @@ Compose a request, organise it, send it, read the response — the whole loop.
   text and by source. Opening an entry gives a tab whose response pane shows the recording
   read-only under a "recorded" banner — re-attached from the log after a relaunch, and replaced the
   moment you send from that tab. "Save to Collection", delete one, clear all.
-- **Import and export** (new): Postman v2.1 collections in both directions, Postman environments
+- **`postfrau`, the command line tool** (new): everything the app does to a workspace, from a
+  shell — for scripts, and for agents. `ls`, `get`, `add`, `set`, `mv`, `rm`, `dup`, `run`,
+  `send`, `env`, `history`, `import`, `export`, `open`, `schema`, `validate`. Items are addressed
+  by the names a person types (`Acme API/Users/List users`, case-insensitive) or by id. It finds
+  the same data folder the app is using, writes to the same history, and attributes every send —
+  `--as claude` shows up in the app's sidebar with a badge. `--capture token='$.data.token'`
+  pulls a value out of a response into the active environment, so a folder can log in and then
+  work. `--dry-run` prints what would go on the wire and records nothing; `--json` is a stable
+  shape, and `run --all` emits NDJSON. `postfrau skill install` writes the `SKILL.md` an agent
+  reads, generated from the same text compiled into the binary so the two cannot disagree.
+- **Import and export**: Postman v2.1 collections in both directions, Postman environments
   in both directions, and cURL in both directions. One File ▸ Import… that works out what a file
   is by reading it — a collection, an environment or a saved curl command — plus dropping a file
   on the sidebar. Anything the importer cannot model is kept verbatim, so an export puts back the
@@ -85,8 +95,9 @@ sends to httpbin and comes back 200, body and headers intact.
 
 ## Next
 
-Phase 11 — the `postfrau` CLI and the Claude Code skill, including the `Commands/SendRequest`
-extraction deferred from Phase 3 (`docs/decisions.md` D11).
+Phase 12 — polish and release: the General settings pane, the final Icon Composer icon, an
+accessibility pass, an Instruments performance pass, crash-safety, the DMG, and README
+screenshots.
 
 ## Known issues / limitations
 
@@ -112,6 +123,14 @@ extraction deferred from Phase 3 (`docs/decisions.md` D11).
   A sandboxed app's open panel runs in another process that will not take synthesized keystrokes,
   and a drag cannot be synthesized here. Everything downstream of the URL the panel returns is
   tested, and the paste-a-curl path was driven end to end in the running app.
+- **This Mac's login keychain currently needs an authorization nobody can give**, so every test
+  that stores a secret skips (visible as "known issues" in the run). The tests say so rather than
+  failing, and rather than hanging — see `docs/decisions.md` D37. Secret storage itself is
+  unchanged and works on a Mac where the keychain answers.
+- The last Phase 11 acceptance clause — "a fresh Claude Code session … completes all three
+  `SKILL.md` workflows without help" — **has not been tried**, because I cannot start an
+  independent session. I ran the three workflows verbatim from the document myself instead, which
+  is what found `--save-to` doing nothing (D38).
 - The Postman importer is measured against **hand-written fixtures**, not a real export from
   Postman. They cover every body mode, nesting, disabled flags, an unsupported auth scheme and
   unknown fields, but a genuine export would be worth a round trip.
@@ -122,7 +141,7 @@ extraction deferred from Phase 3 (`docs/decisions.md` D11).
 
 ## Decisions taken
 
-`docs/decisions.md` D1–D35. Most consequential: D9 `download(for:)` instead of `bytes(for:)` ·
+`docs/decisions.md` D1–D39. Most consequential: D9 `download(for:)` instead of `bytes(for:)` ·
 D11 `Commands` extraction deferred to Phase 11 · D20 response bodies wrap by default (TextKit was
 measuring one multi-megabyte line and blocking the main thread for 30 s) · D22 UI tests split out
 of the commit gate · D24 the sidebar filter is computed once per change and capped ·
@@ -131,4 +150,7 @@ a `URLProtocol` because the sandbox forbids the app from binding a socket · D30
 tab is re-attached from the log rather than duplicated into `ui-state.json` · D31 `dataFolderPath`
 is a real fallback, because a bookmark cannot be shared with a second process · D32 a vanished
 folder is one event and is recovered by polling · D35 live tests need `TEST_RUNNER_`-prefixed
-environment variables, without which the whole suite skipped silently and ran green.
+environment variables, without which the whole suite skipped silently and ran green ·
+D37 the CLI never touches the Keychain unless asked, because `SecItem…` blocks on a dialog
+rather than failing · D38 every value-taking CLI flag is declared, after `--save-to` shipped
+doing nothing at all · D39 `postfrau://` needs `onOpenURL`; SwiftUI never calls the delegate.

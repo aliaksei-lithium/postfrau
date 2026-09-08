@@ -243,3 +243,46 @@ extension AppState {
         markSettingsDirty()
     }
 }
+
+extension AppState {
+    /// Opens whatever an id names — a request, a folder or a collection.
+    ///
+    /// The entry point for `postfrau://open?id=…`, so the CLI can say "show me this" and the app
+    /// does the right thing whichever kind of item it turns out to be. An id that is not here is
+    /// ignored rather than reported: the folder may simply not have synced yet.
+    func openItem(withID id: UUID) {
+        guard let found = ItemResolver.item(withID: id, in: workspace) else { return }
+        switch found {
+        case .request:
+            _ = openRequest(id: id)
+        case .folder(_, let collectionID):
+            expandedIDs.insert(collectionID)
+            expandedIDs.insert(id)
+            openFolderEditor(id, in: collectionID)
+        case .collection:
+            expandedIDs.insert(id)
+            openCollectionEditor(id)
+        }
+        sidebarSelection = id
+        sidebarSection = .collections
+        markUIStateDirty()
+    }
+}
+
+extension AppState {
+    /// Acts on a `postfrau://` URL.
+    ///
+    /// Only one form so far: `postfrau://open?id=<uuid>`. An id rather than a path because a name
+    /// with a slash or a space in it would need escaping the app would then have to undo, and an
+    /// id cannot be ambiguous.
+    func handleIncoming(_ url: URL) {
+        guard url.scheme == "postfrau" else { return }
+        guard url.host == "open" || url.path == "/open",
+              let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let id = components.queryItems?
+                .first(where: { $0.name == "id" })?.value
+                .flatMap(UUID.init(uuidString:))
+        else { return }
+        openItem(withID: id)
+    }
+}

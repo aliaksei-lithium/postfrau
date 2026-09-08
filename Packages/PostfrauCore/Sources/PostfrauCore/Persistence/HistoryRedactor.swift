@@ -11,7 +11,7 @@ public enum HistoryRedactor {
     public static let placeholder = "•••"
 
     /// Headers whose value is always a credential.
-    static let sensitiveHeaders: Set<String> = [
+    public static let sensitiveHeaders: Set<String> = [
         "authorization", "proxy-authorization", "cookie", "set-cookie",
         "x-api-key", "api-key", "x-auth-token", "x-amz-security-token",
     ]

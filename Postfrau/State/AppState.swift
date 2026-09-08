@@ -296,7 +296,7 @@ final class AppState {
     }
 
     /// Ships a small collection on first run so the app is not an empty box.
-    private func installSampleCollection() async {
+    func installSampleCollection() async {
         guard let url = Bundle.main.url(forResource: "SampleCollection", withExtension: "json"),
               let data = try? Data(contentsOf: url),
               let collection = try? Postfrau.makeDecoder().decode(RequestCollection.self, from: data)

@@ -13,15 +13,11 @@ struct SecretsStoreTests {
     }
 
     /// True when this machine lets us write to the Keychain at all.
-    private func isUsable(_ store: SecretsStore) async -> Bool {
-        do {
-            try await store.setValue("probe", scope: UUID(), key: "probe")
-            try await store.deleteEverything()
-            return true
-        } catch {
-            return false
-        }
-    }
+    ///
+    /// Asked through `KeychainProbe` rather than by writing here: a keychain that needs an
+    /// authorization nobody can give blocks in `SecItemAdd` instead of failing, and a probe that
+    /// waits on it takes the whole test run with it.
+    private func isUsable(_ store: SecretsStore) async -> Bool { KeychainProbe.isKeychainUsable }
 
     private func skipUnavailable() {
         withKnownIssue("Keychain is unavailable in this environment.", isIntermittent: true) {

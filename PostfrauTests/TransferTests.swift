@@ -60,6 +60,11 @@ struct AppTransferTests {
     @Test func importsAnEnvironmentWithoutMistakingItForACollection() async {
         let (state, scratch) = makeState()
         defer { try? FileManager.default.removeItem(at: scratch) }
+        // Importing an environment stores its secrets, which needs a keychain that answers.
+        guard AppKeychainProbe.isKeychainUsable else {
+            return withKnownIssue("Keychain is unavailable in this environment.",
+                                  isIntermittent: true) { Issue.record("skipped") }
+        }
 
         await state.importData(environmentJSON, named: "staging.postman_environment.json")
 

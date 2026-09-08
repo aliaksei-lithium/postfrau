@@ -21,6 +21,22 @@ struct EnvironmentTests {
         return (state, root, secrets)
     }
 
+    /// True when this machine's Keychain will actually take an item.
+    ///
+    /// It will not on a Mac whose login keychain is locked or needs an authorization nobody is
+    /// there to give — a headless session, a CI runner. The tests that need it say so and skip,
+    /// the same way the Core Keychain tests do, rather than reporting a machine's state as a
+    /// defect in the app.
+    private func keychainIsUsable(_ secrets: SecretsStore) async -> Bool {
+        AppKeychainProbe.isKeychainUsable
+    }
+
+    private func skipUnavailableKeychain() {
+        withKnownIssue("Keychain is unavailable in this environment.", isIntermittent: true) {
+            Issue.record("skipped")
+        }
+    }
+
     private func makeTab(_ state: AppState, url: String) -> RequestTab {
         let tab = RequestTab(draft: RequestItem(name: "R", url: url))
         state.tabs = [tab]
@@ -61,6 +77,7 @@ struct EnvironmentTests {
 
     @Test func aSecretIsSentCorrectlyButNeverWrittenToTheDataFolder() async throws {
         let (state, root, secrets) = makeState()
+        guard await keychainIsUsable(secrets) else { return skipUnavailableKeychain() }
         defer {
             try? FileManager.default.removeItem(at: root)
             Task { try? await secrets.deleteEverything() }
@@ -92,6 +109,7 @@ struct EnvironmentTests {
 
     @Test func secretsComeBackFromTheKeychainOnALaterLaunch() async throws {
         let (state, root, secrets) = makeState()
+        guard await keychainIsUsable(secrets) else { return skipUnavailableKeychain() }
         defer {
             try? FileManager.default.removeItem(at: root)
             Task { try? await secrets.deleteEverything() }
@@ -114,6 +132,7 @@ struct EnvironmentTests {
 
     @Test func deletingAnEnvironmentRemovesItsSecrets() async throws {
         let (state, root, secrets) = makeState()
+        guard await keychainIsUsable(secrets) else { return skipUnavailableKeychain() }
         defer {
             try? FileManager.default.removeItem(at: root)
             Task { try? await secrets.deleteEverything() }
@@ -144,6 +163,7 @@ struct EnvironmentTests {
 
     @Test func duplicatingAnEnvironmentCopiesItsSecretsUnderTheNewID() async throws {
         let (state, root, secrets) = makeState()
+        guard await keychainIsUsable(secrets) else { return skipUnavailableKeychain() }
         defer {
             try? FileManager.default.removeItem(at: root)
             Task { try? await secrets.deleteEverything() }

@@ -6,8 +6,17 @@ public enum Postfrau {
     public static let schemaVersion = 1
 
     /// Marketing version, read from the host bundle so Core does not hard-code it.
+    /// The version this build reports, in the app and in the `User-Agent`.
+    ///
+    /// The bundle is asked first so a released app reports whatever `Info.plist` says. The
+    /// fallback is not "0.0": the `postfrau` binary has no bundle at all, and a command line tool
+    /// announcing itself as version 0.0 to every server it talks to is worse than one that names
+    /// the version it was built from.
+    public static let fallbackVersion = "1.0"
+
     public static let appVersion: String =
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0"
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+            ?? fallbackVersion
 
     /// The `User-Agent` sent when the user has not set one.
     public static var userAgent: String { "Postfrau/\(appVersion)" }

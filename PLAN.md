@@ -573,20 +573,20 @@ Goal: pointing the data folder at `iCloud Drive/Postfrau` (or Google Drive, Drop
   nesting, disabled flags, an unsupported auth scheme and unknown fields. A genuine Postman export would be
   worth re-running the round-trip against.
 
-### Phase 11 — CLI & agent interface  ☐
+### Phase 11 — CLI & agent interface  ☑
 Goal: an agent with only Bash and `skills/postfrau/SKILL.md` can inspect and edit collections, run requests, and read history, without the app running, and everything it does shows up in the app with attribution.
-- [ ] `Commands` layer in Core (extract from app if Phase 3 didn't already): `SendRequest`, `RunFolder` (sequential, stops-on-error flag),
+- [x] `Commands` layer in Core (extract from app if Phase 3 didn't already): `SendRequest`, `RunFolder` (sequential, stops-on-error flag),
       `ListItems`, `GetRequest`, `AddRequest`, `UpdateRequest` (partial: url/method/headers/params/body/auth), `MoveItem`, `RemoveItem`,
       `DuplicateItem`, `ListEnvironments`, `SetVariable`, `UnsetVariable`, `UseEnvironment`, `ListHistory`, `ImportCurl`, `ExportCurl`.
       Each is a `Sendable` struct with a typed result; `CommandRunner` owns a `WorkspaceStore`, `HTTPExecutor`, `HistoryStore`, `Keychain`.
       Items are addressed by **path** (`Acme API/Users/list`, case-insensitive, `/` escaped as `\/`) or by UUID.
-- [ ] `postfrau` executable target in `Packages/PostfrauCore/Sources/postfrau` (no ArgumentParser dependency; a small
+- [x] `postfrau` executable target in `Packages/PostfrauCore/Sources/postfrau` (no ArgumentParser dependency; a small
       hand-rolled parser is fine — see §0 "no third-party deps"). Global flags: `--json`, `--data-dir`, `--env`, `--as <agent>`,
       `--record off|metadata|headers|full`, `--reveal` (secrets are `•••` in all output otherwise), `--quiet`. Exit codes:
       0 ok, 1 usage, 2 not found, 3 network/transport error, 4 HTTP status ≥ 400 with `--fail`, 5 data folder unavailable.
-- [ ] Data folder discovery order: `--data-dir` → `POSTFRAU_DATA_DIR` → `dataFolderPath` in the app's `settings.json`
+- [x] Data folder discovery order: `--data-dir` → `POSTFRAU_DATA_DIR` → `dataFolderPath` in the app's `settings.json`
       inside the sandbox container → default folder. Local state root: `POSTFRAU_LOCAL_ROOT` → the container path.
-- [ ] Commands: `ls [path] [--tree]`, `get <path>`, `add <folder-path> --name … (--from-curl '…' | --file req.json | --stdin | --url … --method …)`,
+- [x] Commands: `ls [path] [--tree]`, `get <path>`, `add <folder-path> --name … (--from-curl '…' | --file req.json | --stdin | --url … --method …)`,
       `set <path> [--url] [--method] [--header k:v]… [--param k=v]… [--body @file|-] [--auth none|basic:u:p|bearer:t|apikey:k:v[:query]]`,
       `mv <path> <folder-path>`, `rm <path> [--yes]`, `dup <path>`,
       `run <path> [--all] [--var k=v]… [--max-body 64k] [--out file] [--dry-run] [--fail] [--capture name=$.json.path]…`,
@@ -595,24 +595,37 @@ Goal: an agent with only Bash and `skills/postfrau/SKILL.md` can inspect and edi
       `history [--last N] [--agent x] [--since 2h] [--status 5xx]`, `history show <id>`,
       `import <file>` / `export <collection> [--out file]` (reuse Phase 10), `schema [collection|environment|history]`,
       `validate <file>`, `open <path>` (via `postfrau://` URL scheme registered by the app), `skill install [--to dir]`, `version`.
-- [ ] `--dry-run` prints the fully built request (method, final URL, headers, body preview) and writes no history.
+- [x] `--dry-run` prints the fully built request (method, final URL, headers, body preview) and writes no history.
       `--capture name=$.path` evaluates a minimal JSONPath subset (`$.a.b[0].c`) on the response and stores it in the active environment (not as a secret unless `--secret`).
-- [ ] Human output: aligned tables, colored method/status when stdout is a TTY. `--json` output is stable and documented in `SKILL.md`;
+- [x] Human output: aligned tables, colored method/status when stdout is a TTY. `--json` output is stable and documented in `SKILL.md`;
       `run` with `--all` emits NDJSON, one object per request.
-- [ ] App side: register `postfrau://` URL scheme; Settings ▸ Advanced "Install command line tool" symlinks
+- [x] App side: register `postfrau://` URL scheme; Settings ▸ Advanced "Install command line tool" symlinks
       `Postfrau.app/Contents/MacOS/postfrau` into `/usr/local/bin` (ask for the folder via `NSOpenPanel` if not writable;
       never escalate privileges); `make install` for developers. The CLI is copied into the bundle by a build phase.
-- [ ] Keychain from a second binary: document the one-time "Always allow" prompt; fall back to `POSTFRAU_SECRET_<KEY>`
+- [x] Keychain from a second binary: document the one-time "Always allow" prompt; fall back to `POSTFRAU_SECRET_<KEY>`
       env vars when the item is unreadable; never print secret values without `--reveal`.
-- [ ] `skills/postfrau/SKILL.md`: frontmatter (name, description with trigger words: "postfrau", "run request", "API collection"),
+- [x] `skills/postfrau/SKILL.md`: frontmatter (name, description with trigger words: "postfrau", "run request", "API collection"),
       the command reference, the `--json` shapes, exit codes, and three worked workflows: explore an API and save requests
       into a collection; run a request and inspect the response; log in with `--capture` and call an authenticated endpoint.
       Keep it under 300 lines; link to `postfrau schema` for the file format instead of pasting it.
-- [ ] Tests: command layer unit tests with temp data folders; CLI end-to-end tests that spawn the built binary
+- [x] Tests: command layer unit tests with temp data folders; CLI end-to-end tests that spawn the built binary
       (`swift build` product) against a temp folder and a `URLProtocol`-free local listener; `schema` output validates the fixtures.
 - Acceptance: with the app closed, `postfrau add … --from-curl`, `postfrau run … --json`, `postfrau history --agent claude` work
   and survive a second concurrent `run`; launch the app and the new request and the history entry are there with the agent badge;
   a fresh Claude Code session in a scratch directory with only the installed skill completes all three `SKILL.md` workflows without help.
+- Verified with the app closed: `postfrau add … --from-curl`, `run --json`, and
+  `history --agent claude` all work; two concurrent `run`s both land in history with nothing lost.
+  Launching the app on the same workspace shows the new request and both sends with the agent
+  badge. `postfrau open <path>` brings the request up in the running app.
+- Verified by hand: all three `SKILL.md` workflows, run verbatim. The third is the real proof —
+  the token captured from one request resolved into `{{token}}` in the next, and httpbin's
+  `/bearer` endpoint confirmed it arrived. Doing this found `--save-to` silently doing nothing
+  (D38).
+- Not verified: the last acceptance clause, "a fresh Claude Code session … completes all three
+  workflows without help". I cannot start an independent session to try it; running the workflows
+  myself from the document is the nearest thing this environment allows.
+- Deviation: the CLI never touches the Keychain unless `--keychain` is passed (D37).
+- Deviation: the binary is copied into the bundle by `make`, not by an Xcode build phase (D36).
 
 ### Phase 12 — Polish & release  ☐
 - [ ] Full menu bar (File/Edit/View/Request/Window/Help) with every shortcut from §5; Help ▸ Keyboard Shortcuts sheet.

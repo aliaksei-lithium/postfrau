@@ -422,3 +422,60 @@ URL is tested. The acceptance that mattered — an imported request actually sen
 suite — a green run that had tested nothing. `TEST_RUNNER_<NAME>` is the documented way in; the
 prefix is stripped before the host sees it. The Core package tests read the plain name, because
 SwiftPM does pass the shell environment through.
+
+## D36 — The CLI is bundled by `make`, not by an Xcode build phase
+
+**What.** `make build` and `Scripts/release.sh` run `swift build --product postfrau` and copy the
+result into `Postfrau.app/Contents/Helpers/postfrau`. `PLAN.md` asked for an Xcode build phase.
+
+**Why.** A build phase that shells out to `swift build` needs `ENABLE_USER_SCRIPT_SANDBOXING`
+turned off for the whole target, and it would rebuild the package on every app build — several
+seconds added to a loop that is currently under two. The Makefile already owns the build.
+
+**And it goes in `Contents/Helpers`, never `Contents/MacOS`.** macOS filesystems are
+case-insensitive, so copying a file called `postfrau` beside the app's own `Postfrau` executable
+*overwrites the app*. Found the hard way: the app kept "launching" and printing CLI help.
+
+## D37 — The command line tool does not touch the Keychain unless asked
+
+**What.** `postfrau` reads and writes secret values only when `--keychain` is passed. Otherwise
+secrets come from `POSTFRAU_SECRET_<KEY>` environment variables, and a variable with no value
+available is reported at the end of the command.
+
+**Why.** A second binary reaching for Keychain items the app created raises the one-time "Always
+Allow" dialog. `SecItemCopyMatching` and `SecItemAdd` do not fail while that dialog is up — they
+block, forever. On a Mac with someone sitting at it that is one click; from a script, a CI job or
+an agent it is a process that never returns. A tool that can hang indefinitely is worse than one
+that says a value is missing and carries on.
+
+**What changed.** Found by running `postfrau get` against a workspace with a secret in it: the
+process sat for two minutes with no output, and a sample showed it inside `SecItemCopyMatching`.
+The same hazard took the *test suite* down — `KeychainTests.isUsable` probed by writing an item
+and blocked there, turning a six-second run into an indefinite hang. Both test targets now ask
+`KeychainProbe`, which runs the probe on its own thread with a three-second deadline and treats
+silence as "unusable"; the stranded thread cannot be interrupted and is accepted, because a leaked
+thread in a process about to exit is a better trade than never finishing.
+
+## D38 — Every value-taking flag is declared, and a test pins the list
+
+**What.** `CLI.valueFlags` lists every flag that carries a value. `CLITests` exercises the ones
+that would otherwise fail silently.
+
+**Why.** A flag missing from that set is not an error anywhere: it parses as a boolean, its value
+becomes a stray positional argument, and the command quietly does the wrong thing. `--save-to`
+shipped that way — `postfrau send … --save-to 'My API/Health'` returned 0 and saved nothing. It
+was found by running the three `SKILL.md` workflows verbatim, which is the only thing that would
+have found it: every unit test passed.
+
+## D39 — `postfrau://` is handled by `onOpenURL`, not the app delegate
+
+**What.** `PostfrauApp` handles the URL scheme with `.onOpenURL`; `AppDelegate` does not implement
+`application(_:open:)`.
+
+**Why.** SwiftUI installs its own Apple Event handler for `kAEGetURL`, so the delegate method is
+never called in a SwiftUI app — the URL arrives and nothing happens. Diagnosed by watching
+`postfrau open` report success while the app did not change.
+
+Registering the scheme also has to happen in `project.yml`, not in `Info.plist`: XcodeGen
+regenerates that file from the `info.properties` block on every `make gen`, silently discarding
+edits made to it directly.

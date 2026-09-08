@@ -3,7 +3,7 @@ import PostfrauCore
 
 /// The Settings window (⌘,).
 ///
-/// Data and History so far; General and Advanced arrive with the Phase 12 polish pass.
+/// Data, History and Advanced so far; General arrives with the Phase 12 polish pass.
 struct SettingsWindow: View {
     var body: some View {
         TabView {
@@ -12,6 +12,9 @@ struct SettingsWindow: View {
             }
             Tab("History", systemImage: "clock.arrow.circlepath") {
                 HistorySettings()
+            }
+            Tab("Advanced", systemImage: "gearshape.2") {
+                AdvancedSettings()
             }
         }
         .frame(width: 580, height: 500)

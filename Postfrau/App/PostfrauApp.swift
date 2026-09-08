@@ -15,6 +15,13 @@ struct PostfrauApp: App {
                     appDelegate.state = state
                     await state.load()
                 }
+                // `postfrau open <path>` sends `postfrau://open?id=<uuid>`. This rather than
+                // `application(_:open:)` on the delegate: SwiftUI installs its own Apple Event
+                // handler for URLs, so the delegate method is never called in a SwiftUI app.
+                .onOpenURL { url in
+                    appDelegate.bringMainWindowForward()
+                    state.handleIncoming(url)
+                }
         }
         .defaultSize(width: 1180, height: 780)
         .windowToolbarStyle(.unified)

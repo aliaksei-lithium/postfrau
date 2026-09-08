@@ -316,3 +316,78 @@ extension AppSyncTests {
         state.stopWatchingDataFolder()
     }
 }
+
+/// The app half of Phase 11: what `postfrau open` asks the app to do.
+@MainActor
+@Suite("Opening from the CLI")
+struct OpenFromCLITests {
+    private func makeState() -> (AppState, URL) {
+        let root = URL.temporaryDirectory.appending(path: "open-\(UUID().uuidString)")
+        let folder = DataFolder(root: root.appending(path: "Data"), needsCoordination: false)
+        return (AppState(
+            store: WorkspaceStore(dataFolder: folder, localRoot: root),
+            history: HistoryStore(root: root.appending(path: "history"))), root)
+    }
+
+    private func sampleCollection() -> RequestCollection {
+        RequestCollection(
+            name: "Acme API",
+            items: [
+                .folder(Folder(
+                    name: "Users",
+                    items: [.request(RequestItem(name: "List", url: "https://api.test/users"))])),
+            ])
+    }
+
+    @Test func openingARequestIDOpensItAsATab() throws {
+        let (state, scratch) = makeState()
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        let collection = sampleCollection()
+        state.workspace.collections = [collection]
+        let request = try #require(collection.allRequests().first?.request)
+
+        state.openItem(withID: request.id)
+
+        #expect(state.selectedTab?.requestID == request.id)
+        #expect(state.sidebarSelection == request.id)
+        #expect(state.sidebarSection == .collections, "the sidebar shows what was opened")
+    }
+
+    @Test func openingAFolderOpensItsEditorAndExpandsToIt() throws {
+        let (state, scratch) = makeState()
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        let collection = sampleCollection()
+        state.workspace.collections = [collection]
+        let folder = try #require(collection.items.compactMap { item -> Folder? in
+            if case .folder(let folder) = item { return folder } else { return nil }
+        }.first)
+
+        state.openItem(withID: folder.id)
+
+        #expect(state.selectedTab?.kind == .folder)
+        #expect(state.expandedIDs.contains(collection.id))
+        #expect(state.expandedIDs.contains(folder.id))
+    }
+
+    @Test func openingACollectionOpensItsEditor() {
+        let (state, scratch) = makeState()
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        let collection = sampleCollection()
+        state.workspace.collections = [collection]
+
+        state.openItem(withID: collection.id)
+        #expect(state.selectedTab?.kind == .collection)
+        #expect(state.selectedTab?.subjectID == collection.id)
+    }
+
+    @Test func anIDThatIsNotHereIsIgnoredRatherThanReported() {
+        let (state, scratch) = makeState()
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        state.workspace.collections = [sampleCollection()]
+        let before = state.tabs.count
+
+        // The folder may simply not have synced yet; a dialog would be worse than nothing.
+        state.openItem(withID: UUID())
+        #expect(state.tabs.count == before)
+    }
+}
