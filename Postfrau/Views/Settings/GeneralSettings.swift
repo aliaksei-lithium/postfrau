@@ -7,7 +7,14 @@ struct GeneralSettings: View {
 
     var body: some View {
         Form {
-            Section("Appearance") {
+            Section {
+                Picker("Theme", selection: setting(\.appearance)) {
+                    ForEach(Appearance.allCases, id: \.self) { appearance in
+                        Text(appearance.displayName).tag(appearance)
+                    }
+                }
+                .pickerStyle(.segmented)
+
                 LabeledContent("Editor text size") {
                     HStack(spacing: 8) {
                         Slider(
@@ -29,6 +36,14 @@ struct GeneralSettings: View {
                 }
                 Toggle("Wrap long response lines", isOn: setting(\.wrapResponseLines))
                 Toggle("Show line numbers", isOn: setting(\.showResponseLineNumbers))
+            } header: {
+                Text("Appearance")
+            } footer: {
+                Text(
+                    "Theme is kept on this Mac, not in your collections folder — so the same "
+                        + "collections can be light here and dark on another machine.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
             }
 
             Section {

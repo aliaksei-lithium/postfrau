@@ -39,6 +39,7 @@ above fixes it.
 - Collections and folders with inherited variables and auth
 - Environments and globals; secrets live in the Keychain, never in the files
 - History of every send, redacted by default
+- Light, dark or follow-the-system, set per machine — the collections folder stays shared
 - Sync by pointing the data folder at iCloud Drive, Dropbox or a git checkout
 - Import OpenAPI 3.x; import/export Postman v2.1 and cURL, both directions
 - `postfrau` CLI that does all of the above from a shell

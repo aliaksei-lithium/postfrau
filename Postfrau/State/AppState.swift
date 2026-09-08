@@ -259,6 +259,7 @@ final class AppState {
     /// Loads everything from disk and restores the previous session. Called once at launch.
     func load() async {
         settings = await store.loadSettings()
+        applyAppearance()
         await history.setMaxEntries(settings.maxHistoryEntries)
         await resolveDataFolder()
 
@@ -442,7 +443,29 @@ final class AppState {
         globalsDirty = true
         invalidateVariables()
     }
-    func markSettingsDirty() { settingsDirty = true }
+    func markSettingsDirty() {
+        settingsDirty = true
+        // Every settings change comes through here, so this is the one place the appearance can
+        // be applied without each control having to remember to.
+        applyAppearance()
+    }
+
+    /// Applies the light/dark preference to the whole app.
+    ///
+    /// Set on `NSApplication` rather than with `preferredColorScheme` on a view: Postfrau has
+    /// three windows — main, Environments and Settings — and the menu bar besides, and only the
+    /// application-level appearance covers all of them. `nil` means "follow the system".
+    func applyAppearance() {
+        let wanted: NSAppearance? = switch settings.appearance {
+        case .system: nil
+        case .light: NSAppearance(named: .aqua)
+        case .dark: NSAppearance(named: .darkAqua)
+        }
+        // Assigning pushes an appearance change through every view in every window, so only do it
+        // when the value actually differs.
+        guard NSApplication.shared.appearance?.name != wanted?.name else { return }
+        NSApplication.shared.appearance = wanted
+    }
     func markUIStateDirty() { uiStateDirty = true }
 
     private func touchUpdatedAt(collection id: UUID) {

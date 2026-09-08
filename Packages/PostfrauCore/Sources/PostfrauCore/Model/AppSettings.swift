@@ -13,13 +13,33 @@ public enum ResponseLayout: String, Sendable, Hashable, Codable, CaseIterable {
     }
 }
 
+/// Whether the app follows the system's light/dark setting or overrides it.
+public enum Appearance: String, Sendable, Hashable, Codable, CaseIterable {
+    case system
+    case light
+    case dark
+
+    public var displayName: String {
+        switch self {
+        case .system: "System"
+        case .light: "Light"
+        case .dark: "Dark"
+        }
+    }
+}
+
 /// Machine-local preferences. Written to `settings.json` in the local state folder; never synced.
+///
+/// That is what makes `appearance` work the way people expect: light on the laptop and dark on the
+/// work machine, with the same collections folder shared between them.
 public struct AppSettings: Sendable, Hashable, Codable {
     /// Security-scoped bookmark to the user's chosen data folder.
     public var dataFolderBookmark: Data?
     /// Last known path of that folder, shown in Settings even when the bookmark is stale.
     public var dataFolderPath: String?
     public var syncSecretsViaICloudKeychain: Bool
+    /// Light, dark, or whatever the system is doing.
+    public var appearance: Appearance
     public var editorFontSize: Double
     public var responseLayout: ResponseLayout
     public var defaultTimeoutSeconds: Double
@@ -39,6 +59,7 @@ public struct AppSettings: Sendable, Hashable, Codable {
         dataFolderBookmark: Data? = nil,
         dataFolderPath: String? = nil,
         syncSecretsViaICloudKeychain: Bool = false,
+        appearance: Appearance = .system,
         editorFontSize: Double = 12,
         responseLayout: ResponseLayout = .vertical,
         defaultTimeoutSeconds: Double = 30,
@@ -53,6 +74,7 @@ public struct AppSettings: Sendable, Hashable, Codable {
         self.dataFolderBookmark = dataFolderBookmark
         self.dataFolderPath = dataFolderPath
         self.syncSecretsViaICloudKeychain = syncSecretsViaICloudKeychain
+        self.appearance = appearance
         self.editorFontSize = editorFontSize
         self.responseLayout = responseLayout
         self.defaultTimeoutSeconds = defaultTimeoutSeconds
@@ -67,6 +89,7 @@ public struct AppSettings: Sendable, Hashable, Codable {
 
     private enum CodingKeys: String, CodingKey {
         case schemaVersion, dataFolderBookmark, dataFolderPath, syncSecretsViaICloudKeychain
+        case appearance
         case editorFontSize, responseLayout, defaultTimeoutSeconds, defaultVerifyTLS
         case maxHistoryEntries, allowPreviewJavaScript, wrapResponseLines, showResponseLineNumbers
         case historyRecording, historyBodyCapBytes
@@ -79,6 +102,7 @@ public struct AppSettings: Sendable, Hashable, Codable {
         dataFolderPath = try c.decodeIfPresent(String.self, forKey: .dataFolderPath)
         syncSecretsViaICloudKeychain =
             try c.decodeIfPresent(Bool.self, forKey: .syncSecretsViaICloudKeychain) ?? d.syncSecretsViaICloudKeychain
+        appearance = try c.decodeIfPresent(Appearance.self, forKey: .appearance) ?? d.appearance
         editorFontSize = try c.decodeIfPresent(Double.self, forKey: .editorFontSize) ?? d.editorFontSize
         responseLayout = try c.decodeIfPresent(ResponseLayout.self, forKey: .responseLayout) ?? d.responseLayout
         defaultTimeoutSeconds =
@@ -102,6 +126,7 @@ public struct AppSettings: Sendable, Hashable, Codable {
         try c.encodeIfPresent(dataFolderBookmark, forKey: .dataFolderBookmark)
         try c.encodeIfPresent(dataFolderPath, forKey: .dataFolderPath)
         try c.encode(syncSecretsViaICloudKeychain, forKey: .syncSecretsViaICloudKeychain)
+        try c.encode(appearance, forKey: .appearance)
         try c.encode(editorFontSize, forKey: .editorFontSize)
         try c.encode(responseLayout, forKey: .responseLayout)
         try c.encode(defaultTimeoutSeconds, forKey: .defaultTimeoutSeconds)

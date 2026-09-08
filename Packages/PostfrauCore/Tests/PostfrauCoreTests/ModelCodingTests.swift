@@ -162,7 +162,7 @@ struct ModelCodingTests {
 
     @Test func appSettingsAndUIStateRoundTrip() throws {
         let settings = AppSettings(
-            dataFolderPath: "/tmp/x", syncSecretsViaICloudKeychain: true,
+            dataFolderPath: "/tmp/x", syncSecretsViaICloudKeychain: true, appearance: .dark,
             editorFontSize: 14, responseLayout: .horizontal, maxHistoryEntries: 250)
         #expect(try roundTrip(settings) == settings)
 
@@ -170,5 +170,14 @@ struct ModelCodingTests {
             tabs: [TabState(draft: RequestItem(name: "T"), isDirty: true)],
             sidebarWidth: 300, requestPaneFraction: 0.6, windowFrame: "0 0 100 100")
         #expect(try roundTrip(state) == state)
+    }
+
+    /// A `settings.json` written before the theme setting existed must still open, following the
+    /// system rather than forcing anyone into a theme they never chose.
+    @Test func settingsWrittenBeforeTheThemeSettingStillOpen() throws {
+        let json = Data(#"{"schemaVersion":1,"editorFontSize":14}"#.utf8)
+        let settings = try JSONDecoder().decode(AppSettings.self, from: json)
+        #expect(settings.appearance == .system)
+        #expect(settings.editorFontSize == 14)
     }
 }
