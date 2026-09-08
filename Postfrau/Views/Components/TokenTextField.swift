@@ -2,16 +2,24 @@ import AppKit
 import SwiftUI
 import PostfrauCore
 
-/// The URL field: a single-line editor that colours `{{variables}}` and shows what each resolves
-/// to on hover.
+/// The URL field: an editor that colours `{{variables}}` and shows what each resolves to on hover.
 ///
 /// `TextField` cannot do either — it has no access to attributed runs while editing and no
-/// per-character hit testing — so this is an `NSTextView` configured to behave like a one-line
-/// field: Return sends instead of inserting a newline, and there is no wrapping.
+/// per-character hit testing — so this is an `NSTextView` configured to behave like a field:
+/// Return sends rather than inserting a newline.
+///
+/// It wraps, and grows to fit, up to `maximumLines`. A long URL with a query string is the normal
+/// case, not the exception, and a one-line field turns it into a horizontal scroll where you can
+/// only ever see a fragment of what you are about to send. Past the limit it scrolls vertically,
+/// so a pathological URL cannot eat the window.
 struct TokenTextField: NSViewRepresentable {
     @Binding var text: String
     var fontSize: Double
     var placeholder: String
+    /// How tall it may grow before it starts scrolling instead.
+    var maximumLines = 4
+    /// Reports the height the text needs, so the caller can size the row.
+    var onHeightChange: (Double) -> Void = { _ in }
     /// Resolves `{{…}}` so tokens can be coloured and explained. Re-created whenever the
     /// environment or the request's scope changes.
     var resolver: VariableResolver
@@ -35,11 +43,11 @@ struct TokenTextField: NSViewRepresentable {
         textView.isGrammarCheckingEnabled = false
         textView.drawsBackground = false
         textView.textContainerInset = NSSize(width: 6, height: 6)
-        textView.textContainer?.widthTracksTextView = false
-        textView.textContainer?.size = NSSize(
-            width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        // Wrap to the field's width and grow downwards, rather than scrolling sideways.
+        textView.textContainer?.widthTracksTextView = true
         textView.textContainer?.lineFragmentPadding = 0
-        textView.isHorizontallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.isVerticallyResizable = true
         textView.maxSize = NSSize(
             width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         textView.setAccessibilityLabel("Request URL")
@@ -50,6 +58,7 @@ struct TokenTextField: NSViewRepresentable {
         scrollView.hasVerticalScroller = false
         scrollView.hasHorizontalScroller = false
         scrollView.verticalScrollElasticity = .none
+        scrollView.autohidesScrollers = true
         scrollView.borderType = .noBorder
 
         context.coordinator.apply(self, to: textView, initial: true)
@@ -60,12 +69,15 @@ struct TokenTextField: NSViewRepresentable {
         guard let textView = scrollView.documentView as? TokenTextViewCore else { return }
         context.coordinator.parent = self
         context.coordinator.apply(self, to: textView, initial: false)
+        context.coordinator.reportHeight(of: textView)
     }
 
     @MainActor
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: TokenTextField
         private var displayedText: String?
+        /// The last height handed back, so an unchanged one does not churn the layout.
+        private var lastReportedHeight: Double = 0
         /// Tokens for the text currently on screen, used for hover tooltips.
         private(set) var tokens: [VariableToken] = []
         private(set) var currentText = ""
@@ -89,6 +101,37 @@ struct TokenTextField: NSViewRepresentable {
                 }
             }
             highlight(textView, font: font, config: config)
+            reportHeight(of: textView)
+        }
+
+        /// Measures the laid-out text and tells the caller how tall the field wants to be.
+        ///
+        /// TextKit 2, deliberately: reading `layoutManager` on an `NSTextView` silently downgrades
+        /// it to TextKit 1, which is a large behavioural change to make by accident just to
+        /// measure something.
+        func reportHeight(of textView: NSTextView) {
+            guard let layout = textView.textLayoutManager,
+                  let container = layout.textContainer
+            else { return }
+            layout.ensureLayout(for:
+                CGRect(origin: .zero, size: CGSize(
+                    width: container.size.width, height: .greatestFiniteMagnitude)))
+
+            // `defaultLineHeight(for:)` is the height the text is actually laid out at.
+            // `boundingRectForFont` is larger — using it made a four-line cap render as six.
+            // The throwaway layout manager is not the text view's, so this does not drag it back
+            // to TextKit 1.
+            let font = NSFont.monospacedSystemFont(ofSize: parent.fontSize, weight: .regular)
+            let line = NSLayoutManager().defaultLineHeight(for: font)
+            let inset = textView.textContainerInset.height * 2
+            let used = layout.usageBoundsForTextContainer.height
+            // One line at least, `maximumLines` at most; past that the scroll view takes over.
+            let content = max(line, min(used, line * Double(parent.maximumLines)))
+            let height = (content + inset).rounded(.up)
+
+            guard abs(height - lastReportedHeight) > 0.5 else { return }
+            lastReportedHeight = height
+            parent.onHeightChange(height)
         }
 
         /// Colours each `{{token}}`: green when it resolves, red when it does not.
@@ -126,6 +169,7 @@ struct TokenTextField: NSViewRepresentable {
                 highlight(tokenView, font: tokenView.font ?? .monospacedSystemFont(
                     ofSize: parent.fontSize, weight: .regular), config: parent)
             }
+            reportHeight(of: textView)
         }
 
         /// Return sends the request rather than inserting a newline, which is what makes this

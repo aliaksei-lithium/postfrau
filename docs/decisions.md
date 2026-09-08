@@ -801,3 +801,29 @@ obvious move and the wrong one.
 a known cause: `List(selection:)` binds to `sidebarSelection`, so `SidebarView.body` re-evaluates
 on every selection and rebuilds all forty rows. Fixing that means getting the selection binding
 out of the body that owns the rows.
+
+## D51 — The URL field wraps and grows
+
+**What.** `TokenTextField` wraps and grows to fit, up to four lines, then scrolls vertically. It
+was a one-line field that scrolled sideways.
+
+**Why.** A long URL with a query string is the normal case, not the exception — an imported
+OpenAPI collection is full of them. A one-line field turns that into a horizontal scroll where you
+can only ever see a fragment of what you are about to send, and the interesting part of a URL is
+usually the end.
+
+**How the height is measured.** TextKit 2, deliberately: reading `layoutManager` on an
+`NSTextView` silently downgrades it to TextKit 1, which is a large behavioural change to make by
+accident just to measure something. So `textLayoutManager.usageBoundsForTextContainer`, after
+`ensureLayout(for:)`, reported back through a callback the caller turns into a frame height.
+
+**The cap has to be in the right units.** The first version capped at `maximumLines *
+NSFont.boundingRectForFont.height`. That is the font's design height, not the height the text is
+laid out at, and it is larger — a four-line cap rendered as about six. `NSLayoutManager()
+.defaultLineHeight(for:)` on a throwaway layout manager gives the real one without touching the
+text view's own.
+
+**What had to keep working, and was checked:** Return still sends rather than inserting a newline,
+`{{tokens}}` are still coloured and still explain themselves on hover, the field shrinks back when
+the URL does, and the method picker and Send button stay beside the first line instead of drifting
+to the middle of a growing box.

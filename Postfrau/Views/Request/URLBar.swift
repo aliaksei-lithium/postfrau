@@ -7,15 +7,22 @@ struct URLBar: View {
     @Bindable var tab: RequestTab
     @FocusState.Binding var urlFieldFocused: Bool
 
+    /// How tall the URL field wants to be, reported by the field as the text wraps.
+    @State private var urlHeight: Double = 26
+
     var body: some View {
-        HStack(spacing: 8) {
+        // Top-aligned: when the URL wraps to several lines the method picker and Send stay put
+        // beside the first line rather than drifting down to the middle of a growing box.
+        HStack(alignment: .top, spacing: 8) {
             MethodPicker(method: $tab.draft.method)
                 .onChange(of: tab.draft.method) { state.draftChanged(tab) }
+                .frame(height: 26)
 
             TokenTextField(
                 text: Binding(get: { tab.draft.url }, set: { tab.urlEdited(to: $0) }),
                 fontSize: state.settings.editorFontSize,
                 placeholder: "Enter a URL",
+                onHeightChange: { urlHeight = $0 },
                 resolver: state.resolver(for: tab),
                 onSubmit: { state.send(tab) },
                 onChange: { text in
@@ -25,7 +32,7 @@ struct URLBar: View {
                     guard !state.handlePastedCurl(text, into: tab) else { return }
                     state.draftChanged(tab)
                 })
-            .frame(height: 26)
+            .frame(height: urlHeight)
             .background(
                 RoundedRectangle(cornerRadius: 6)
                     .fill(Color(nsColor: .textBackgroundColor)))
