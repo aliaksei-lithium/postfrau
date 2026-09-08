@@ -37,14 +37,17 @@ struct KeyValueEditor: View {
     }
 
     private var headerRow: some View {
+        // `Spacer`, not `Color.clear`: a `Color` is greedy in *both* axes, so constraining only
+        // its width left these standing in for the checkbox and delete button while stretching
+        // the header to the full height of the pane.
         HStack(spacing: 8) {
-            Color.clear.frame(width: 18)
+            Spacer().frame(width: 18)
             Text(keyPrompt).frame(maxWidth: .infinity, alignment: .leading)
             Text(valuePrompt).frame(maxWidth: .infinity, alignment: .leading)
             if showsDescription {
                 Text("Description").frame(maxWidth: .infinity, alignment: .leading)
             }
-            Color.clear.frame(width: 20)
+            Spacer().frame(width: 20)
         }
         .font(.caption.weight(.medium))
         .foregroundStyle(.secondary)

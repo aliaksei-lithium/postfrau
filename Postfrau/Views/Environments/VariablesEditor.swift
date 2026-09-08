@@ -31,11 +31,11 @@ struct VariablesEditor: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            Color.clear.frame(width: 18)
+            Spacer().frame(width: 18)
             Text("Variable").frame(maxWidth: .infinity, alignment: .leading)
             Text("Value").frame(maxWidth: .infinity, alignment: .leading)
             if showsSecretToggle { Text("Secret").frame(width: 52) }
-            Color.clear.frame(width: 20)
+            Spacer().frame(width: 20)
         }
         .font(.caption.weight(.medium))
         .foregroundStyle(.secondary)
