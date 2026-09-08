@@ -44,13 +44,49 @@ extension AppState {
     }
 
     /// Opens a history entry as an unsaved tab.
+    ///
+    /// When the entry recorded headers or a body, the response pane shows the recording rather
+    /// than an empty "no response yet" — reconstructed as an `HTTPResponse` so every existing
+    /// viewer (pretty, raw, headers, cookies) works on it unchanged.
     @discardableResult
     func openHistoryEntry(_ entry: HistoryEntry) -> RequestTab {
+        // The same entry twice is one tab, the way opening a saved request twice is: a second
+        // identical tab is never what was wanted, and it is easy to make by accident.
+        if let existing = tabs.first(where: { $0.recordedEntry?.id == entry.id }) {
+            selectedTabID = existing.id
+            markUIStateDirty()
+            return existing
+        }
+
         let tab = RequestTab(draft: entry.requestSnapshot, isFromHistory: true)
+        if entry.hasRecordedExchange {
+            tab.recordedEntry = entry
+            tab.response = Self.recordedResponse(for: entry)
+            tab.selectedResponseTab = entry.responseBody == nil ? .headers : .pretty
+        }
+        tab.errorMessage = entry.responseBody == nil && entry.statusCode == nil ? entry.error : nil
         tabs.append(tab)
         selectedTabID = tab.id
         markUIStateDirty()
         return tab
+    }
+
+    /// The recorded half of an exchange, as the response viewer wants it.
+    ///
+    /// The timing is deliberately only the total: the phase breakdown was never recorded, and
+    /// inventing zeros for DNS and TLS would read as "instant" rather than "unknown".
+    static func recordedResponse(for entry: HistoryEntry) -> HTTPResponse {
+        let status = entry.statusCode ?? 0
+        return HTTPResponse(
+            statusCode: status,
+            reasonPhrase: status == 0 ? "No response" : ReasonPhrase.forStatus(status),
+            headers: entry.responseHeaders ?? [],
+            body: .inMemory(entry.responseBody?.data ?? Data()),
+            mimeType: entry.responseBody?.mimeType,
+            timing: Timing(total: entry.durationMs / 1000),
+            finalURL: entry.resolvedURL,
+            sentHeaders: entry.requestHeaders ?? [],
+            wasTruncated: entry.responseBody?.truncated ?? false)
     }
 
     // MARK: - Closing

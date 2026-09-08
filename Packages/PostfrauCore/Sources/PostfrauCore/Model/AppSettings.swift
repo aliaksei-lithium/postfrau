@@ -25,6 +25,10 @@ public struct AppSettings: Sendable, Hashable, Codable {
     public var defaultTimeoutSeconds: Double
     public var defaultVerifyTLS: Bool
     public var maxHistoryEntries: Int
+    /// How much of each exchange is written to history.
+    public var historyRecording: HistoryRecordLevel
+    /// The most bytes of any one body kept in a history entry.
+    public var historyBodyCapBytes: Int
     /// Whether the HTML preview may run JavaScript and load subresources. Off by default so a
     /// previewed response cannot phone home.
     public var allowPreviewJavaScript: Bool
@@ -40,6 +44,8 @@ public struct AppSettings: Sendable, Hashable, Codable {
         defaultTimeoutSeconds: Double = 30,
         defaultVerifyTLS: Bool = true,
         maxHistoryEntries: Int = 1000,
+        historyRecording: HistoryRecordLevel = .metadata,
+        historyBodyCapBytes: Int = 262_144,
         allowPreviewJavaScript: Bool = false,
         wrapResponseLines: Bool = true,
         showResponseLineNumbers: Bool = false
@@ -52,6 +58,8 @@ public struct AppSettings: Sendable, Hashable, Codable {
         self.defaultTimeoutSeconds = defaultTimeoutSeconds
         self.defaultVerifyTLS = defaultVerifyTLS
         self.maxHistoryEntries = maxHistoryEntries
+        self.historyRecording = historyRecording
+        self.historyBodyCapBytes = historyBodyCapBytes
         self.allowPreviewJavaScript = allowPreviewJavaScript
         self.wrapResponseLines = wrapResponseLines
         self.showResponseLineNumbers = showResponseLineNumbers
@@ -61,6 +69,7 @@ public struct AppSettings: Sendable, Hashable, Codable {
         case schemaVersion, dataFolderBookmark, dataFolderPath, syncSecretsViaICloudKeychain
         case editorFontSize, responseLayout, defaultTimeoutSeconds, defaultVerifyTLS
         case maxHistoryEntries, allowPreviewJavaScript, wrapResponseLines, showResponseLineNumbers
+        case historyRecording, historyBodyCapBytes
     }
 
     public init(from decoder: any Decoder) throws {
@@ -76,6 +85,10 @@ public struct AppSettings: Sendable, Hashable, Codable {
             try c.decodeIfPresent(Double.self, forKey: .defaultTimeoutSeconds) ?? d.defaultTimeoutSeconds
         defaultVerifyTLS = try c.decodeIfPresent(Bool.self, forKey: .defaultVerifyTLS) ?? d.defaultVerifyTLS
         maxHistoryEntries = try c.decodeIfPresent(Int.self, forKey: .maxHistoryEntries) ?? d.maxHistoryEntries
+        historyRecording =
+            try c.decodeIfPresent(HistoryRecordLevel.self, forKey: .historyRecording) ?? d.historyRecording
+        historyBodyCapBytes =
+            try c.decodeIfPresent(Int.self, forKey: .historyBodyCapBytes) ?? d.historyBodyCapBytes
         allowPreviewJavaScript =
             try c.decodeIfPresent(Bool.self, forKey: .allowPreviewJavaScript) ?? d.allowPreviewJavaScript
         wrapResponseLines = try c.decodeIfPresent(Bool.self, forKey: .wrapResponseLines) ?? d.wrapResponseLines
@@ -94,6 +107,8 @@ public struct AppSettings: Sendable, Hashable, Codable {
         try c.encode(defaultTimeoutSeconds, forKey: .defaultTimeoutSeconds)
         try c.encode(defaultVerifyTLS, forKey: .defaultVerifyTLS)
         try c.encode(maxHistoryEntries, forKey: .maxHistoryEntries)
+        try c.encode(historyRecording, forKey: .historyRecording)
+        try c.encode(historyBodyCapBytes, forKey: .historyBodyCapBytes)
         try c.encode(allowPreviewJavaScript, forKey: .allowPreviewJavaScript)
         try c.encode(wrapResponseLines, forKey: .wrapResponseLines)
         try c.encode(showResponseLineNumbers, forKey: .showResponseLineNumbers)

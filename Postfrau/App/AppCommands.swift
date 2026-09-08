@@ -99,6 +99,27 @@ struct AppCommands: Commands {
             }
         }
 
+        CommandMenu("History") {
+            CommandButton(
+                title: "Open Last Send", state: state,
+                isEnabled: { !$0.historyEntries.isEmpty },
+                action: { state in
+                    if let entry = state.historyEntries.first { state.openHistoryEntry(entry) }
+                })
+            .keyboardShortcut("h", modifiers: [.command, .shift])
+
+            CommandButton(
+                title: "Show History", state: state,
+                action: { $0.sidebarSection = .history })
+
+            Divider()
+
+            CommandButton(
+                title: "Delete All History…", state: state,
+                isEnabled: { !$0.historyEntries.isEmpty },
+                action: { $0.isConfirmingClearHistory = true })
+        }
+
         CommandGroup(after: .windowList) {
             CommandButton(title: "Next Tab", state: state) { $0.selectNextTab() }
                 .keyboardShortcut("]", modifiers: [.command, .shift])

@@ -5,24 +5,19 @@ import PostfrauCore
 struct SidebarView: View {
     @Environment(AppState.self) private var state
 
-    enum Section: String, CaseIterable, Identifiable {
-        case collections, history
-        var id: String { rawValue }
-        var title: String { self == .collections ? "Collections" : "History" }
-    }
-
-    @State private var section: Section = .collections
-
     var body: some View {
         @Bindable var state = state
+        let section = state.sidebarSection
         VStack(spacing: 0) {
-            Picker("Sidebar section", selection: $section) {
-                ForEach(Section.allCases) { Text($0.title).tag($0) }
+            Picker("Sidebar section", selection: $state.sidebarSection) {
+                ForEach(AppState.SidebarSection.allCases) { Text($0.title).tag($0) }
             }
             .pickerStyle(.segmented)
             .labelsHidden()
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
+
+            if section == .history { HistoryFilterBar() }
 
             List(selection: $state.sidebarSelection) {
                 switch section {
@@ -42,6 +37,16 @@ struct SidebarView: View {
             .searchable(
                 text: $state.sidebarFilter, placement: .sidebar,
                 prompt: section == .collections ? "Filter requests" : "Filter history")
+            .confirmationDialog(
+                "Delete all history?",
+                isPresented: $state.isConfirmingClearHistory,
+                titleVisibility: .visible
+            ) {
+                Button("Delete All", role: .destructive) { state.clearHistory() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("\(state.historyEntries.count) recorded send(s) will be removed from this Mac.")
+            }
         }
         .navigationSplitViewColumnWidth(min: 220, ideal: state.sidebarWidth, max: 460)
     }

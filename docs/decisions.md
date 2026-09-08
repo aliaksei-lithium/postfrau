@@ -314,3 +314,44 @@ like a way to keep eyeballing the UI. It is not: `NavigationSplitView` and `List
 rather than kept as a test that passes while producing a meaningless image.
 `Scripts/screenshot.sh` (capture by window id, `.optionAll`) remains the way to look at the app,
 and it works for any window that has actually been displayed.
+
+## D28 — App tests answer requests with a `URLProtocol` echo, not a local HTTP server
+
+**What.** `PostfrauTests` intercepts requests with `EchoURLProtocol`, a `URLProtocol` that answers
+with a JSON echo of what it was asked for, rather than binding a real socket in-process.
+
+**Why.** The first attempt was a genuine `NWListener` on an ephemeral port, so the Phase 8
+recording tests would exercise a real `URLSession` round trip end to end. It cannot work: the app
+is sandboxed with `com.apple.security.network.client` only, and the test bundle runs inside the
+app, so `bind` fails with `Operation not permitted`. Adding `network.server` would widen the
+shipping app's sandbox for the sake of a test — the wrong trade for an HTTP *client*.
+
+**What changed.** The whole of Postfrau stays in the path — request building, auth resolution, the
+executor, the recording and the redaction; only the wire is replaced. `PLAN.md` Phase 8 records
+the deviation. The kickoff allows either form ("`URLProtocol` mocks or an in-process listener").
+
+## D29 — Settings ships as one pane, not a tab view
+
+**What.** `SettingsWindow` renders `HistorySettings` directly. There is no `TabView`.
+
+**Why.** Phase 8 is the first phase that needs a Settings window, and it has exactly one pane to
+put in it. A `TabView` with a single tab draws a tab strip that explains nothing and, in the first
+build, also stopped the window sizing to its content (the "Delete All History…" button was clipped
+off the bottom edge).
+
+**What changed.** Phase 12, which adds the remaining panes, adds the tab strip with them.
+`PLAN.md` Phase 8 and Phase 12 both note it.
+
+## D30 — A recorded history tab is re-attached from the log, not stored in the UI state
+
+**What.** `TabState` carries `historyEntryID`; the recorded headers and body are not written into
+`ui-state.json`. On launch, once history has been read, `reattachRecordedTabs()` looks the entry up
+and rebuilds the response.
+
+**Why.** A restored history tab that shows "No response yet" is a bug the user sees every relaunch.
+The obvious fix — persist the exchange with the tab — would copy a capped body (up to
+`historyBodyCapBytes`, 256 KB by default, per tab) into a file that is rewritten on every quit,
+duplicating something the history log already holds.
+
+**What changed.** `UIState.sidebarSection`, which had been in the model since Phase 3 but was never
+read or written, is wired up in the same place: the sidebar section now survives a relaunch too.

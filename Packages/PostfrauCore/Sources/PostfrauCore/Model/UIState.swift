@@ -28,6 +28,9 @@ public struct TabState: Sendable, Hashable, Codable, Identifiable {
     public var isDirty: Bool
     /// Set for tabs opened from history, which have no home in a collection.
     public var isFromHistory: Bool
+    /// The history entry a `isFromHistory` tab was opened from. The recorded exchange itself is
+    /// not duplicated here: it lives in the history log, and is re-attached on restore.
+    public var historyEntryID: UUID?
     /// Which request sub-tab (Params/Headers/…) was showing.
     public var selectedEditorTab: String?
 
@@ -40,6 +43,7 @@ public struct TabState: Sendable, Hashable, Codable, Identifiable {
         draft: RequestItem = RequestItem(),
         isDirty: Bool = false,
         isFromHistory: Bool = false,
+        historyEntryID: UUID? = nil,
         selectedEditorTab: String? = nil
     ) {
         self.id = id
@@ -50,12 +54,13 @@ public struct TabState: Sendable, Hashable, Codable, Identifiable {
         self.draft = draft
         self.isDirty = isDirty
         self.isFromHistory = isFromHistory
+        self.historyEntryID = historyEntryID
         self.selectedEditorTab = selectedEditorTab
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, kind, subjectID, requestID, collectionID, draft, isDirty
-        case isFromHistory, selectedEditorTab
+        case isFromHistory, historyEntryID, selectedEditorTab
     }
 
     public init(from decoder: any Decoder) throws {
@@ -68,6 +73,7 @@ public struct TabState: Sendable, Hashable, Codable, Identifiable {
         draft = try c.decodeIfPresent(RequestItem.self, forKey: .draft) ?? RequestItem()
         isDirty = try c.decodeIfPresent(Bool.self, forKey: .isDirty) ?? false
         isFromHistory = try c.decodeIfPresent(Bool.self, forKey: .isFromHistory) ?? false
+        historyEntryID = try c.decodeIfPresent(UUID.self, forKey: .historyEntryID)
         selectedEditorTab = try c.decodeIfPresent(String.self, forKey: .selectedEditorTab)
     }
 }

@@ -132,6 +132,9 @@ public struct RequestCollection: Sendable, Hashable, Codable, Identifiable {
     public var updatedAt: Date
     /// Bumped by `WorkspaceStore` on every write; used to order concurrent edits from two Macs.
     public var revision: Int
+    /// Overrides the app-wide history recording level for everything in this collection.
+    /// Nil means "use the app setting" — the common case.
+    public var historyRecording: HistoryRecordLevel?
     public var extras: [String: JSONValue]
 
     public init(
@@ -144,6 +147,7 @@ public struct RequestCollection: Sendable, Hashable, Codable, Identifiable {
         createdAt: Date = Date(),
         updatedAt: Date = Date(),
         revision: Int = 1,
+        historyRecording: HistoryRecordLevel? = nil,
         extras: [String: JSONValue] = [:]
     ) {
         self.id = id
@@ -155,12 +159,13 @@ public struct RequestCollection: Sendable, Hashable, Codable, Identifiable {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.revision = revision
+        self.historyRecording = historyRecording
         self.extras = extras
     }
 
     private enum CodingKeys: String, CodingKey {
         case schemaVersion, id, name, description, auth, variables, items
-        case createdAt, updatedAt, revision, extras
+        case createdAt, updatedAt, revision, historyRecording, extras
     }
 
     public init(from decoder: any Decoder) throws {
@@ -175,6 +180,7 @@ public struct RequestCollection: Sendable, Hashable, Codable, Identifiable {
         createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
         updatedAt = try c.decodeIfPresent(Date.self, forKey: .updatedAt) ?? createdAt
         revision = try c.decodeIfPresent(Int.self, forKey: .revision) ?? 1
+        historyRecording = try c.decodeIfPresent(HistoryRecordLevel.self, forKey: .historyRecording)
         extras = try c.decodeIfPresent([String: JSONValue].self, forKey: .extras) ?? [:]
     }
 
@@ -190,6 +196,7 @@ public struct RequestCollection: Sendable, Hashable, Codable, Identifiable {
         try c.encode(createdAt, forKey: .createdAt)
         try c.encode(updatedAt, forKey: .updatedAt)
         try c.encode(revision, forKey: .revision)
+        try c.encodeIfPresent(historyRecording, forKey: .historyRecording)
         if !extras.isEmpty { try c.encode(extras, forKey: .extras) }
     }
 }

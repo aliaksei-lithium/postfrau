@@ -52,7 +52,14 @@ final class AppState {
     }
 
     var saveState: SaveState = .idle
+    /// Which half of the sidebar is showing. On `AppState` rather than the view's own `@State`
+    /// so the History menu can switch to it.
+    var sidebarSection: SidebarSection = .collections
     var historyEntries: [HistoryEntry] = []
+    /// Which sends the History sidebar shows. Not persisted: a filter that survives a relaunch
+    /// looks like missing history.
+    var historySourceFilter: HistorySourceFilter = .all
+    var isConfirmingClearHistory = false
     /// Bumped by ⌘L; the window watches it and moves focus into the URL field.
     private(set) var urlFocusRequests = 0
     /// Set when a menu command wants to close a tab that has unsaved work; the tab bar owns the
@@ -95,7 +102,7 @@ final class AppState {
     // MARK: Collaborators
 
     let store: WorkspaceStore
-    let historyLog: HistoryLog
+    let history: HistoryStore
     let executor: HTTPExecutor
     /// Secret variable values. Kept out of the data folder entirely — see `SecretsStore`.
     let secretsStore: SecretsStore
@@ -114,18 +121,20 @@ final class AppState {
     private var uiStateDirty = false
 
     @ObservationIgnored private var autosaveTask: Task<Void, Never>?
+    /// History removals in flight. `flush()` waits for them; see `enqueueHistoryWork`.
+    @ObservationIgnored var pendingHistoryWork: Task<Void, Never>?
 
     /// How long edits are batched before they are written.
     static let autosaveDebounce = Duration.milliseconds(300)
 
     init(
         store: WorkspaceStore,
-        historyLog: HistoryLog,
+        history: HistoryStore,
         executor: HTTPExecutor = HTTPExecutor(),
         secretsStore: SecretsStore = SecretsStore()
     ) {
         self.store = store
-        self.historyLog = historyLog
+        self.history = history
         self.executor = executor
         self.secretsStore = secretsStore
     }
@@ -139,9 +148,9 @@ final class AppState {
         let localRoot = overriddenLocalRoot() ?? DataFolder.defaultLocalRoot()
         let dataFolder = DataFolder.defaultFolder(localRoot: localRoot)
         let store = WorkspaceStore(dataFolder: dataFolder, localRoot: localRoot)
-        let historyLog = HistoryLog(
-            fileURL: localRoot.appending(path: "history.jsonl", directoryHint: .notDirectory))
-        return AppState(store: store, historyLog: historyLog)
+        let history = HistoryStore(
+            root: localRoot.appending(path: "history", directoryHint: .isDirectory))
+        return AppState(store: store, history: history)
     }
 
     /// Where machine-local state lives, honouring the launch overrides.
@@ -190,7 +199,7 @@ final class AppState {
     /// Loads everything from disk and restores the previous session. Called once at launch.
     func load() async {
         settings = await store.loadSettings()
-        await historyLog.setMaxEntries(settings.maxHistoryEntries)
+        await history.setMaxEntries(settings.maxHistoryEntries)
 
         do {
             let result = try await store.load()
@@ -213,7 +222,7 @@ final class AppState {
             await installSampleCollection()
         }
 
-        historyEntries = (try? await historyLog.load(limit: settings.maxHistoryEntries)) ?? []
+        await loadHistory()
 
         startAutosave()
         startFilterDebounce()
@@ -227,9 +236,12 @@ final class AppState {
         filterTask = nil
         await writePendingChanges()
         await saveUIState()
+        await drainHistoryWork()
     }
 
     private func restore(_ uiState: UIState) {
+        sidebarSection = uiState.sidebarSection
+            .flatMap(SidebarSection.init(rawValue:)) ?? .collections
         sidebarWidth = uiState.sidebarWidth
         requestPaneFraction = uiState.requestPaneFraction
         expandedIDs = Set(uiState.expandedItemIDs)
@@ -426,7 +438,8 @@ final class AppState {
             activeEnvironmentID: workspace.activeEnvironmentID,
             expandedItemIDs: Array(expandedIDs),
             sidebarWidth: sidebarWidth,
-            requestPaneFraction: requestPaneFraction)
+            requestPaneFraction: requestPaneFraction,
+            sidebarSection: sidebarSection.rawValue)
         try? await store.save(uiState: state)
     }
 }

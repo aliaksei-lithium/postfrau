@@ -50,6 +50,13 @@ extension AppState {
         let auth = effectiveAuth(for: tab).auth
         let collectionName = tab.collectionID
             .flatMap { workspace.collection(withID: $0) }?.name
+        // Captured before the send so the recording reflects the settings in force when the user
+        // pressed Send, not whatever they happen to be when the response lands.
+        let recording = Recording(
+            level: recordLevel(forCollection: tab.collectionID),
+            secrets: secretValues(for: tab)
+                .union(Self.credentials(in: auth, resolver: resolver)),
+            bodyCap: settings.historyBodyCapBytes)
 
         tab.sendTask = Task { [weak self, weak tab] in
             guard let self, let tab else { return }
@@ -65,8 +72,9 @@ extension AppState {
                 tab.response = response
                 tab.isSending = false
                 await self.record(
-                    request: request, resolvedURL: built.resolvedURL, response: response,
-                    error: nil, startedAt: started, collectionName: collectionName)
+                    request: request, resolvedURL: built.resolvedURL, built: built,
+                    response: response, error: nil, startedAt: started,
+                    collectionName: collectionName, recording: recording)
             } catch is CancellationError {
                 tab.isSending = false
             } catch {
@@ -74,9 +82,9 @@ extension AppState {
                 tab.isSending = false
                 tab.errorMessage = Self.message(for: error)
                 await self.record(
-                    request: request, resolvedURL: request.url, response: nil,
-                    error: Self.message(for: error), startedAt: started,
-                    collectionName: collectionName)
+                    request: request, resolvedURL: request.url, built: nil,
+                    response: nil, error: Self.message(for: error), startedAt: started,
+                    collectionName: collectionName, recording: recording)
             }
         }
     }
@@ -101,31 +109,116 @@ extension AppState {
 
     // MARK: - History
 
+    /// The stored copy of the request: redacted always, and below `.full` stripped of its body.
+    ///
+    /// PLAN.md §6 Phase 8 — the default level keeps what makes an entry findable and re-sendable
+    /// without keeping the payload. The body is the part most likely to hold something personal.
+    static func snapshot(of request: RequestItem, recording: Recording) -> RequestItem {
+        var stored = HistoryRedactor.redact(request: request, secrets: recording.secrets)
+        if !recording.level.recordsBodies { stored.body = .none }
+        return stored
+    }
+
+    /// The credential values a request carries, resolved.
+    ///
+    /// A token typed straight into the Auth tab is every bit as sensitive as one stored as a
+    /// secret variable, and it comes back in the response of any endpoint that echoes headers.
+    /// Redacting the header alone would leave it sitting in the recorded body.
+    static func credentials(in auth: Auth, resolver: VariableResolver) -> Set<String> {
+        let values: [String]
+        switch auth {
+        case .none, .inherit: values = []
+        case .bearer(let token): values = [token]
+        case .basic(_, let password): values = [password]
+        case .apiKey(_, let value, _): values = [value]
+        }
+        return Set(values.map { resolver.resolved($0) }.filter { !$0.isEmpty })
+    }
+
+    /// What history should keep about one send, decided before the request goes out.
+    struct Recording: Sendable {
+        var level: HistoryRecordLevel
+        var secrets: Set<String>
+        var bodyCap: Int
+    }
+
     private func record(
         request: RequestItem,
         resolvedURL: String,
+        built: BuiltRequest?,
         response: HTTPResponse?,
         error: String?,
         startedAt: Date,
-        collectionName: String?
+        collectionName: String?,
+        recording: Recording
     ) async {
-        let entry = HistoryEntry(
+        guard recording.level != .off else { return }
+
+        var entry = HistoryEntry(
             sentAt: startedAt,
             method: request.method,
-            resolvedURL: resolvedURL,
+            resolvedURL: HistoryRedactor.redact(text: resolvedURL, secrets: recording.secrets),
             statusCode: response?.statusCode,
             durationMs: response?.timing.totalMilliseconds
                 ?? Date().timeIntervalSince(startedAt) * 1000,
             responseBytes: response?.byteCount ?? 0,
-            requestSnapshot: request,
+            requestSnapshot: Self.snapshot(of: request, recording: recording),
             error: error,
-            collectionName: collectionName)
+            collectionName: collectionName,
+            source: .app,
+            recordLevel: recording.level)
 
-        try? await historyLog.append(entry)
-        historyEntries.insert(entry, at: 0)
-        if historyEntries.count > settings.maxHistoryEntries {
-            historyEntries.removeLast(historyEntries.count - settings.maxHistoryEntries)
+        if recording.level.recordsHeaders {
+            entry.requestHeaders = built.map {
+                HistoryRedactor.redact(headers: $0.allHeaders, secrets: recording.secrets)
+            }
+            entry.responseHeaders = response.map {
+                HistoryRedactor.redact(headers: $0.headers, secrets: recording.secrets)
+            }
         }
+        if recording.level.recordsBodies {
+            entry.requestBody = await Self.recordedRequestBody(built, recording: recording)
+            entry.responseBody = await Self.recordedResponseBody(response, recording: recording)
+        }
+
+        await appendHistory(entry)
+    }
+
+    /// Reads the bodies off the main thread — a `.full` recording of a 20 MB response must not
+    /// stall the window that is busy rendering it.
+    @concurrent
+    private static func recordedRequestBody(
+        _ built: BuiltRequest?, recording: Recording
+    ) async -> RecordedBody? {
+        guard let built else { return nil }
+        let data: Data?
+        switch built.payload {
+        case .data(let bytes): data = bytes
+        case .file(let url): data = try? Data(contentsOf: url, options: [.mappedIfSafe])
+        case .none: data = nil
+        }
+        guard let data, !data.isEmpty else { return nil }
+        let body = RecordedBody.capped(
+            data, cap: recording.bodyCap,
+            mimeType: built.allHeaders.value(for: "Content-Type"))
+        return HistoryRedactor.redact(body: body, secrets: recording.secrets)
+    }
+
+    @concurrent
+    private static func recordedResponseBody(
+        _ response: HTTPResponse?, recording: Recording
+    ) async -> RecordedBody? {
+        guard let response else { return nil }
+        // Only the capped prefix is read, so a huge response costs the cap and not its size.
+        guard let data = try? response.body.prefix(recording.bodyCap), !data.isEmpty else {
+            return nil
+        }
+        let body = RecordedBody(
+            data: data,
+            truncated: response.byteCount > data.count,
+            originalBytes: response.byteCount,
+            mimeType: response.mimeType)
+        return HistoryRedactor.redact(body: body, secrets: recording.secrets)
     }
 }
 

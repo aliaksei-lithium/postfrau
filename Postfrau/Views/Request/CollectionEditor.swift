@@ -76,6 +76,16 @@ struct CollectionEditor: View {
                     .frame(minHeight: 80)
                     .accessibilityLabel("Collection description")
                 }
+
+                Picker("Record history", selection: historyRecording(collection)) {
+                    Text("Use app setting (\(state.settings.historyRecording.displayName))")
+                        .tag(HistoryRecordLevel?.none)
+                    Divider()
+                    ForEach(HistoryRecordLevel.allCases, id: \.self) { level in
+                        Text(level.displayName).tag(HistoryRecordLevel?.some(level))
+                    }
+                }
+                .help("Overrides the app-wide level for every request in this collection.")
             }
             .formStyle(.grouped)
         case .auth:
@@ -89,6 +99,12 @@ struct CollectionEditor: View {
                 onChange: {})
             .accessibilityLabel("Collection variables")
         }
+    }
+
+    /// Nil means "inherit the app setting", which is what almost every collection wants; the
+    /// override exists for the one API you never want written down.
+    private func historyRecording(_ collection: RequestCollection) -> Binding<HistoryRecordLevel?> {
+        binding(collection, \.historyRecording)
     }
 
     /// Writes straight through to the workspace: a collection editor has no separate draft, so

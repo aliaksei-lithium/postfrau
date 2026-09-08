@@ -8,6 +8,10 @@ struct ResponsePane: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if let entry = tab.recordedEntry {
+                RecordedBanner(entry: entry)
+                Divider()
+            }
             if let response = tab.response {
                 ResponseHeaderLine(response: response, tab: tab)
                 Divider()
@@ -255,5 +259,39 @@ struct RedirectChainView: View {
                 .lineLimit(2)
         }
         .padding(14)
+    }
+}
+
+/// The strip above a response that was read back from history rather than received just now.
+///
+/// History is a recording, not a replay: what is shown may be capped, and every credential in it
+/// was replaced before it was written. Saying so is the difference between a useful archive and a
+/// misleading one.
+struct RecordedBanner: View {
+    var entry: HistoryEntry
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "clock.arrow.circlepath")
+            Text("Recorded \(entry.sentAt.formatted(.relative(presentation: .named)))")
+            if entry.recordLevel == .full {
+                Text("· secrets redacted").foregroundStyle(.secondary)
+            }
+            if entry.responseBody?.truncated == true, let bytes = entry.responseBody?.originalBytes {
+                Text("· first \(ByteCount.format(entry.responseBody?.data.count ?? 0)) of \(ByteCount.format(bytes))")
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Label(entry.source.displayName, systemImage: entry.source.symbolName)
+                .labelStyle(.titleAndIcon)
+                .foregroundStyle(.secondary)
+        }
+        .font(.callout)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary.opacity(0.4))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Recorded response, read only")
     }
 }

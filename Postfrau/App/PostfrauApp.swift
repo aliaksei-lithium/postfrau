@@ -28,6 +28,11 @@ struct PostfrauApp: App {
         }
         .defaultSize(width: 820, height: 480)
         .keyboardShortcut("e", modifiers: .command)
+
+        Settings {
+            SettingsWindow()
+                .environment(state)
+        }
         .onChange(of: scenePhase) { _, phase in
             // Flush on background so a force-quit cannot lose the last 300 ms of edits.
             if phase != .active {

@@ -54,6 +54,12 @@ final class RequestTab: Identifiable {
     var savedSnapshot: RequestItem
     /// True for tabs opened from history: they have no home in a collection.
     var isFromHistory: Bool
+    /// The history entry this tab was opened from, when it carries a recorded exchange. Its
+    /// presence is what puts the response pane into read-only "recorded" mode.
+    var recordedEntry: HistoryEntry?
+    /// Set while restoring a session: the entry this tab had open, to be looked up once history
+    /// has been read. The recording is not duplicated into the UI state — history already has it.
+    @ObservationIgnored var restoredHistoryEntryID: UUID?
 
     var response: HTTPResponse?
     var errorMessage: String?
@@ -138,11 +144,15 @@ final class RequestTab: Identifiable {
     }
 
     /// Discards the previous response's spill file before a new send replaces it.
+    ///
+    /// The recorded entry goes with it: once this tab has been sent again, what is on screen is a
+    /// live response, and a "Recorded 5 minutes ago" banner over it would be a lie.
     func clearResponse() {
         response?.body.discardTemporaryFile()
         response = nil
         errorMessage = nil
         warnings = []
+        recordedEntry = nil
     }
 
     func markSaved() {
@@ -163,6 +173,7 @@ final class RequestTab: Identifiable {
             draft: draft,
             isDirty: isDirty,
             isFromHistory: isFromHistory,
+            historyEntryID: recordedEntry?.id ?? restoredHistoryEntryID,
             selectedEditorTab: selectedEditorTab.rawValue)
     }
 
@@ -175,6 +186,7 @@ final class RequestTab: Identifiable {
             collectionID: state.collectionID,
             draft: state.draft,
             isFromHistory: state.isFromHistory)
+        restoredHistoryEntryID = state.historyEntryID
         selectedEditorTab = state.selectedEditorTab.flatMap(EditorTab.init(rawValue:)) ?? .params
         // The restored draft is treated as clean here. A tab backed by a saved request gets its
         // real saved copy re-attached in `AppState.restore`, which is what makes the dirty dot

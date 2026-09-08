@@ -464,24 +464,35 @@ update checkboxes here → `git commit -m "Phase N: …"`. Never start phase N+1
   `docs/decisions.md` D22 and D27. iCloud Keychain sync cannot work on an unsigned build and now says so
   rather than failing quietly — D26.)*
 
-### Phase 8 — History  ☐
-- [ ] `HistoryStore` (replaces `HistoryLog`): one JSON file per entry under `history/<day>/`, append = write one
+### Phase 8 — History  ☑
+- [x] `HistoryStore` (replaces `HistoryLog`): one JSON file per entry under `history/<day>/`, append = write one
       file, load = list newest-first with a limit, prune, delete, clear. Safe for the app and the CLI writing at the
       same time (no shared file is ever rewritten). One-time migration of an existing `history.jsonl`.
-- [ ] Recording levels (`HistoryRecordLevel`): **off** (nothing written), **metadata** (default: method, URL, status,
+- [x] Recording levels (`HistoryRecordLevel`): **off** (nothing written), **metadata** (default: method, URL, status,
       timing, size, request snapshot without body), **headers** (+ request/response headers), **full** (+ bodies capped
       at `historyBodyCapBytes`, `truncated` flag). Redaction per §3 applied before write, always. Level lives in
       Settings ▸ History; per-collection override (`historyRecording` on the collection, nil = inherit) for APIs you never want logged.
-- [ ] Attribution: `source` on every entry — `.app`, `.cli`, `.agent(name)` (CLI reads `POSTFRAU_AGENT` / `--as`).
-- [ ] Sidebar History section grouped by day: method, status color, URL path, relative time, source badge for
+- [x] Attribution: `source` on every entry — `.app`, `.cli`, `.agent(name)`. Recorded, filtered and badged.
+      *(The CLI half — reading `POSTFRAU_AGENT` / `--as` — arrives with the CLI itself in Phase 11; the app
+      writes `.app` and the format and the UI are ready for the other two.)*
+- [x] Sidebar History section grouped by day: method, status color, URL path, relative time, source badge for
       non-app entries; filter by text and by source; "Agents only" toggle.
-- [ ] Click opens a tab with the snapshot (unsaved, titled "History · GET /users"); when headers/bodies were recorded
+- [x] Click opens a tab with the snapshot (unsaved, titled "History · GET /users"); when headers/bodies were recorded
       the response pane shows them read-only with a "recorded" banner. "Save to collection…" action.
-- [ ] Clear all; delete single entry; cap configurable in Settings (default 1000).
-- [ ] History records failed sends too (with the error).
+- [x] Clear all; delete single entry; cap configurable in Settings (default 1000).
+- [x] History records failed sends too (with the error).
 - Acceptance: 1 000 entries load in < 200 ms at launch; filter is instant; switching to **full** records a body and
   the file on disk has the bearer token replaced by •••; two processes appending simultaneously lose nothing
   (test with a second `Process`).
+- Verified: 1 000 entries spread over five day folders load in 71 ms (`HistoryStoreTests`); a real `.full` send writes a file whose
+  `Authorization`, auth block and echoed response body all read `•••` (inspected on disk, and asserted in
+  `HistoryRecordingTests`); a second `/bin/sh` writer and the in-process actor interleave 150 entries each with
+  nothing lost and no torn read (`HistoryConcurrencyTests`). Filtering is over the in-memory array the sidebar
+  already holds, so it costs one pass over at most `maxHistoryEntries` rows.
+- Deviation: the app-level tests answer requests with a `URLProtocol` echo rather than an in-process HTTP
+  listener — the sandbox grants the app network *client* access only, so it cannot bind a socket (D28).
+- Deviation: `Settings ▸ History` ships as the whole Settings window rather than one tab of it; Phase 12 adds the
+  other panes and the tab strip (D29).
 
 ### Phase 9 — Sync via data folder  ☐
 Goal: pointing the data folder at `iCloud Drive/Postfrau` (or Google Drive, Dropbox, a git checkout) makes two Macs share collections and environments, without Postfrau ever running a server.
@@ -583,6 +594,8 @@ Goal: an agent with only Bash and `skills/postfrau/SKILL.md` can inspect and edi
 - [ ] Full menu bar (File/Edit/View/Request/Window/Help) with every shortcut from §5; Help ▸ Keyboard Shortcuts sheet.
 - [ ] Settings window: General (font size, response layout, default timeout, default verify TLS, max history),
       Data (the Phase 9 pane), History (recording level, body cap, "Clear history"), Advanced ("Install command line tool", "Reset sample collection", "Open local state folder").
+      *(The History pane and the window itself already exist from Phase 8, as the window's only content;
+      adding the other panes here means adding the tab strip with them — see D29.)*
 - [ ] Window/state restoration, multiple windows not required (single window app; ⌘N when window is closed reopens it).
 - [ ] Final app icon as an Icon Composer `.icon` bundle (layered glass, light/dark/clear/tinted variants), About window with version + license.
 - [ ] Accessibility pass: labels on everything; VoiceOver can operate URL bar, Send, tabs; check Reduce Transparency and Increase Contrast renderings.

@@ -13,6 +13,16 @@ public struct HistoryEntry: Sendable, Hashable, Codable, Identifiable {
     public var error: String?
     /// The collection the request was saved in when it was sent, if any.
     public var collectionName: String?
+    /// Who sent it: the app, the CLI, or a named agent.
+    public var source: HistorySource
+    /// How much of the exchange this entry holds.
+    public var recordLevel: HistoryRecordLevel
+    /// Present only at `.headers` and above. Redacted.
+    public var requestHeaders: [HeaderField]?
+    public var responseHeaders: [HeaderField]?
+    /// Present only at `.full`. Capped and redacted.
+    public var requestBody: RecordedBody?
+    public var responseBody: RecordedBody?
 
     public init(
         id: UUID = UUID(),
@@ -24,7 +34,13 @@ public struct HistoryEntry: Sendable, Hashable, Codable, Identifiable {
         responseBytes: Int = 0,
         requestSnapshot: RequestItem = RequestItem(),
         error: String? = nil,
-        collectionName: String? = nil
+        collectionName: String? = nil,
+        source: HistorySource = .app,
+        recordLevel: HistoryRecordLevel = .metadata,
+        requestHeaders: [HeaderField]? = nil,
+        responseHeaders: [HeaderField]? = nil,
+        requestBody: RecordedBody? = nil,
+        responseBody: RecordedBody? = nil
     ) {
         self.id = id
         self.sentAt = sentAt
@@ -36,6 +52,18 @@ public struct HistoryEntry: Sendable, Hashable, Codable, Identifiable {
         self.requestSnapshot = requestSnapshot
         self.error = error
         self.collectionName = collectionName
+        self.source = source
+        self.recordLevel = recordLevel
+        self.requestHeaders = requestHeaders
+        self.responseHeaders = responseHeaders
+        self.requestBody = requestBody
+        self.responseBody = responseBody
+    }
+
+    /// True when this entry carries more than the metadata, so the viewer can offer it.
+    public var hasRecordedExchange: Bool {
+        requestHeaders != nil || responseHeaders != nil
+            || requestBody != nil || responseBody != nil
     }
 
     /// The path (and query) of the resolved URL, for the compact sidebar row.
@@ -51,8 +79,9 @@ public struct HistoryEntry: Sendable, Hashable, Codable, Identifiable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, sentAt, method, resolvedURL, statusCode, durationMs
+        case schemaVersion, id, sentAt, method, resolvedURL, statusCode, durationMs
         case responseBytes, requestSnapshot, error, collectionName
+        case source, recordLevel, requestHeaders, responseHeaders, requestBody, responseBody
     }
 
     public init(from decoder: any Decoder) throws {
@@ -67,10 +96,17 @@ public struct HistoryEntry: Sendable, Hashable, Codable, Identifiable {
         requestSnapshot = try c.decodeIfPresent(RequestItem.self, forKey: .requestSnapshot) ?? RequestItem()
         error = try c.decodeIfPresent(String.self, forKey: .error)
         collectionName = try c.decodeIfPresent(String.self, forKey: .collectionName)
+        source = try c.decodeIfPresent(HistorySource.self, forKey: .source) ?? .app
+        recordLevel = try c.decodeIfPresent(HistoryRecordLevel.self, forKey: .recordLevel) ?? .metadata
+        requestHeaders = try c.decodeIfPresent([HeaderField].self, forKey: .requestHeaders)
+        responseHeaders = try c.decodeIfPresent([HeaderField].self, forKey: .responseHeaders)
+        requestBody = try c.decodeIfPresent(RecordedBody.self, forKey: .requestBody)
+        responseBody = try c.decodeIfPresent(RecordedBody.self, forKey: .responseBody)
     }
 
     public func encode(to encoder: any Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(Postfrau.schemaVersion, forKey: .schemaVersion)
         try c.encode(id, forKey: .id)
         try c.encode(sentAt, forKey: .sentAt)
         try c.encode(method, forKey: .method)
@@ -81,5 +117,11 @@ public struct HistoryEntry: Sendable, Hashable, Codable, Identifiable {
         try c.encode(requestSnapshot, forKey: .requestSnapshot)
         try c.encodeIfPresent(error, forKey: .error)
         try c.encodeIfPresent(collectionName, forKey: .collectionName)
+        try c.encode(source, forKey: .source)
+        try c.encode(recordLevel, forKey: .recordLevel)
+        try c.encodeIfPresent(requestHeaders, forKey: .requestHeaders)
+        try c.encodeIfPresent(responseHeaders, forKey: .responseHeaders)
+        try c.encodeIfPresent(requestBody, forKey: .requestBody)
+        try c.encodeIfPresent(responseBody, forKey: .responseBody)
     }
 }

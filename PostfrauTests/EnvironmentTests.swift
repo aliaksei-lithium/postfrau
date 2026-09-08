@@ -16,7 +16,7 @@ struct EnvironmentTests {
         let state = AppState(
             store: WorkspaceStore(
                 dataFolder: DataFolder(root: root, needsCoordination: false), localRoot: root),
-            historyLog: HistoryLog(fileURL: root.appending(path: "history.jsonl")),
+            history: HistoryStore(root: root.appending(path: "history")),
             secretsStore: secrets)
         return (state, root, secrets)
     }
