@@ -56,6 +56,29 @@ final class AppState {
     /// so the History menu can switch to it.
     var sidebarSection: SidebarSection = .collections
     var historyEntries: [HistoryEntry] = []
+
+    // MARK: Sync
+
+    /// The data folder as it was last resolved, for the Data pane and the status chip.
+    var dataFolder = DataFolder(root: URL(filePath: NSTemporaryDirectory()), isDefault: true)
+    /// Foreign changes held back because the same document had unsaved local edits.
+    var syncConflicts: [SyncConflict] = []
+    /// Collections whose files disappeared while the app was running.
+    var missingCollections: [MissingCollection] = []
+    /// When another process last touched the folder, for the status chip.
+    var lastExternalChange: Date?
+    /// Guards against a second diff starting while one is still applying.
+    var isAbsorbingFolderChanges = false
+    /// Set when the data folder could not be opened; shown in the Data pane.
+    var dataFolderProblem: String?
+    /// Documents iCloud has been asked for but has not delivered yet, for the sidebar spinner.
+    var downloadingDocuments: Set<UUID> = []
+    /// The security-scoped URL whose access is open for the life of the process.
+    @ObservationIgnored var securityScopedRoot: URL?
+    @ObservationIgnored var folderWatcher: FolderWatcher?
+    @ObservationIgnored var syncTask: Task<Void, Never>?
+    /// Polls for a data folder that went away, since a dead directory sends no more events.
+    @ObservationIgnored var folderRecoveryTask: Task<Void, Never>?
     /// Which sends the History sidebar shows. Not persisted: a filter that survives a relaunch
     /// looks like missing history.
     var historySourceFilter: HistorySourceFilter = .all
@@ -200,6 +223,7 @@ final class AppState {
     func load() async {
         settings = await store.loadSettings()
         await history.setMaxEntries(settings.maxHistoryEntries)
+        await resolveDataFolder()
 
         do {
             let result = try await store.load()
@@ -226,6 +250,7 @@ final class AppState {
 
         startAutosave()
         startFilterDebounce()
+        await startWatchingDataFolder()
     }
 
     /// Writes everything pending. Called on quit and when the window closes.
@@ -237,6 +262,7 @@ final class AppState {
         await writePendingChanges()
         await saveUIState()
         await drainHistoryWork()
+        stopWatchingDataFolder()
     }
 
     private func restore(_ uiState: UIState) {
@@ -343,12 +369,26 @@ final class AppState {
     func markDirty(collection id: UUID) {
         touchUpdatedAt(collection: id)
         dirtyCollectionIDs.insert(id)
-        sidebarCacheGeneration &+= 1
+        invalidateSidebarCache()
     }
+
+    /// Tells the sidebar its memoized tree snapshot is out of date.
+    ///
+    /// Separate from `markDirty` because a collection can change without becoming dirty: a version
+    /// arriving from another Mac is already on disk, and marking it dirty would write it straight
+    /// back.
+    func invalidateSidebarCache() { sidebarCacheGeneration &+= 1 }
 
     func markDirty(environment id: UUID) {
         dirtyEnvironmentIDs.insert(id)
     }
+
+    /// True when this collection has an edit queued that has not reached the disk.
+    func isDirty(collection id: UUID) -> Bool { dirtyCollectionIDs.contains(id) }
+
+    /// Drops a queued edit — used when the user chooses the version that arrived from another Mac
+    /// over their own, which must not then be written back on the next autosave.
+    func clearDirty(collection id: UUID) { dirtyCollectionIDs.remove(id) }
 
     func markGlobalsDirty() { globalsDirty = true }
     func markSettingsDirty() { settingsDirty = true }

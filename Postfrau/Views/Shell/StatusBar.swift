@@ -22,6 +22,8 @@ struct StatusBar: View {
                 .accessibilityLabel("Could not read \(state.loadIssues.count) file(s). \(detail)")
             }
             Spacer()
+            SyncChip()
+            Divider().frame(height: 12)
             saveIndicator
             Divider().frame(height: 12)
             Text(state.workspace.activeEnvironment?.name ?? "No environment")

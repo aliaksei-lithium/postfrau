@@ -14,6 +14,7 @@ struct MainWindow: View {
         } detail: {
             VStack(spacing: 0) {
                 TabBar()
+                SyncBanners()
                 if let tab = state.selectedTab {
                     detail(for: tab, state: state)
                 } else {

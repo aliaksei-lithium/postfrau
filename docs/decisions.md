@@ -355,3 +355,43 @@ duplicating something the history log already holds.
 
 **What changed.** `UIState.sidebarSection`, which had been in the model since Phase 3 but was never
 read or written, is wired up in the same place: the sidebar section now survives a relaunch too.
+
+## D31 — `dataFolderPath` is a real fallback, not just a label
+
+**What.** `DataFolderBookmark.folder` uses `settings.dataFolderPath` when there is no
+`dataFolderBookmark`, instead of going straight to the default folder.
+
+**Why.** A security-scoped bookmark belongs to the process that created it. Phase 9's own manual
+test — two instances on one Mac sharing a folder — cannot work without this, and neither can the
+`postfrau` CLI in Phase 11: a second process has only the path. The fallback works wherever the
+sandbox already permits the location (inside the container, or a folder the user has granted) and
+reports `.missing` / `.unreadable` honestly where it does not, so nothing is silently wrong.
+
+**What changed.** The bookmark still wins when both are present. `PLAN.md` Phase 9 records it.
+
+## D32 — A vanished folder is one event, recovered by polling
+
+**What.** `absorbFolderChanges` re-reads `DataFolder.status` before diffing and stops if the folder
+is not there, showing "folder unavailable" instead. A `folderRecoveryTask` then polls every three
+seconds until it returns, and restarts the watcher when it does.
+
+**Why.** Two problems, one cause. Diffing a folder that has gone reports *every* document as
+removed, so unmounting a volume would bury the user in "no longer in the data folder" banners for
+what is a single event. And a `DispatchSource` on a deleted directory fires once and is then dead,
+so without polling an unmounted volume would need a relaunch. Polling is the honest tool: there is
+nothing left to subscribe to.
+
+**What changed.** Found by deleting the data folder under a running app: it survived, but the
+status chip still read "synced just now". Both halves are covered by `PostfrauTests/SyncTests`.
+
+## D33 — Relocation backups are per-document JSON, not a zip
+
+**What.** Switching to a folder whose data wins writes each local collection and environment to
+`conflicts/<name> (before switch)-<host>-<date>.json` rather than a single zip archive.
+
+**Why.** `PLAN.md` said "a backup zip". Zipping needs either an archiver dependency (forbidden by
+§0) or `NSFileCoordinator`'s bundle trickery, and it buys nothing: the merge path already writes
+per-document copies to the same place, and a single document is far easier to recover from a
+folder of readable JSON than from inside an archive.
+
+**What changed.** `PLAN.md` Phase 9 now says "a backup", with the shape named.

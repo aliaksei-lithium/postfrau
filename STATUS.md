@@ -1,8 +1,8 @@
 # Postfrau — status
 
-**Current phase:** 9 (Sync via data folder) — next
-**Last completed:** Phase 8 — History
-**Build:** green — `make test` passes: 339 Core tests (~6 s) plus 23 app unit tests.
+**Current phase:** 10 (Import / Export) — next
+**Last completed:** Phase 9 — Sync via the data folder
+**Build:** green — `make test` passes: 364 Core tests (~6 s) plus 36 app unit tests.
 
 > **UI tests need a free, awake desktop.** `make ui-test` runs the XCUITest suite separately,
 > because it drives the real UI and needs a display where Postfrau's window can come to the front.
@@ -47,6 +47,17 @@ Compose a request, organise it, send it, read the response — the whole loop.
   text and by source. Opening an entry gives a tab whose response pane shows the recording
   read-only under a "recorded" banner — re-attached from the log after a relaunch, and replaced the
   moment you send from that tab. "Save to Collection", delete one, clear all.
+- **Sync** (new): point the data folder at anything a sync client watches — iCloud Drive, Google
+  Drive, Dropbox, a git checkout — and two Macs share collections and environments with no server
+  in between. An `NSFilePresenter` and a `DispatchSource` together catch both coordinated and
+  plain writes; a burst is coalesced for 500 ms and answered with one diff, and Postfrau
+  recognises its own writes by fingerprint so a save never comes back as a foreign edit. A change
+  to something you are not editing is adopted silently, open tabs and all; a change to something
+  with unsaved edits keeps your copy on screen and parks theirs in `conflicts/` behind a banner
+  offering *Keep mine* / *Take theirs* / *Show both*. A file that disappears marks its collection
+  missing with *Restore from memory*. Settings ▸ Data chooses the folder, with a sheet that asks
+  what to do about data already there (move / use theirs / merge by revision), and nothing is ever
+  deleted. iCloud placeholders are requested on launch and show a per-collection spinner.
 - **Collections**: create / rename / duplicate / delete collections, folders and requests
   from context menus and shortcuts; drag-and-drop between folders and across collections, with
   illegal drops (a folder into itself) refused; collection and folder editor tabs for name,
@@ -58,12 +69,13 @@ Compose a request, organise it, send it, read the response — the whole loop.
 first megabyte and stays interactive. A 5 000-request collection loads in 1.5 s to an interactive
 window, and seven successive filter passes over it take under 350 ms in total. 1 000 history
 entries across five day folders load in 71 ms. A second process and the in-process store each
-append 150 entries at once with nothing lost and no torn read.
+append 150 entries at once with nothing lost and no torn read. Two app instances sharing one data
+folder both pick up an external change within about three seconds.
 
 ## Next
 
-Phase 9 — sync via the data folder: a user-chosen folder resolved from a security-scoped bookmark,
-file coordination, external-change detection and conflict handling.
+Phase 10 — import and export: Postman v2.1 collections and environments, and cURL in both
+directions.
 
 ## Known issues / limitations
 
@@ -74,9 +86,15 @@ file coordination, external-change detection and conflict handling.
 - **iCloud Keychain sync cannot work on this build.** Synchronizable Keychain items need a real
   signing identity; an ad-hoc build gets `errSecMissingEntitlement`. The toggle now reports that
   and reverts rather than pretending (`docs/decisions.md` D26). Local secret storage works fully.
-- The Settings window exists but holds only the History pane (`docs/decisions.md` D29). The rest of
-  the preferences — including "allow JavaScript in previews" — still need `settings.json` edited by
-  hand until Phase 12.
+- The Settings window holds Data and History (`docs/decisions.md` D29). General and Advanced arrive
+  in Phase 12; until then preferences without an inline control — notably "allow JavaScript in
+  previews" — need `settings.json` edited by hand.
+- The **conflict banner** has been exercised by test but not photographed: producing one by hand
+  means holding a collection unsaved while another process writes it, and autosave closes that
+  window in 300 ms. The *missing collection* banner, which shares the component, was eyeballed.
+- Sync has been proved between **two instances on one Mac**, not between two Macs over a real
+  iCloud Drive account — this machine has one login. The iCloud-specific paths (placeholder
+  download, ignoring Apple's own conflict versions) are covered by tests, not by a live account.
 - The "Agents only" filter has been exercised by test but not photographed: it is a segmented
   picker in a sidebar row that AppleScript could not reach, and screen control was declined.
 - `URLSession` occasionally leaves a `CFNetworkDownload_*.tmp` in the container's tmp when a
@@ -86,10 +104,12 @@ file coordination, external-change detection and conflict handling.
 
 ## Decisions taken
 
-`docs/decisions.md` D1–D30. Most consequential: D9 `download(for:)` instead of `bytes(for:)` ·
+`docs/decisions.md` D1–D33. Most consequential: D9 `download(for:)` instead of `bytes(for:)` ·
 D11 `Commands` extraction deferred to Phase 11 · D20 response bodies wrap by default (TextKit was
 measuring one multi-megabyte line and blocking the main thread for 30 s) · D22 UI tests split out
 of the commit gate · D24 the sidebar filter is computed once per change and capped ·
 D25 menu commands hold the state instead of reading it through focus · D28 app tests echo through
 a `URLProtocol` because the sandbox forbids the app from binding a socket · D30 a restored history
-tab is re-attached from the log rather than duplicated into `ui-state.json`.
+tab is re-attached from the log rather than duplicated into `ui-state.json` · D31 `dataFolderPath`
+is a real fallback, because a bookmark cannot be shared with a second process · D32 a vanished
+folder is one event and is recovered by polling.

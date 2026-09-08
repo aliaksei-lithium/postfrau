@@ -3,13 +3,18 @@ import PostfrauCore
 
 /// The Settings window (⌘,).
 ///
-/// Phase 8 fills in History; the remaining panes arrive with the Phase 12 polish pass. Until
-/// there is more than one, the pane *is* the window — a `TabView` with a single tab is a strip of
-/// chrome that explains nothing.
+/// Data and History so far; General and Advanced arrive with the Phase 12 polish pass.
 struct SettingsWindow: View {
     var body: some View {
-        HistorySettings()
-            .frame(width: 520, height: 460)
+        TabView {
+            Tab("Data", systemImage: "folder") {
+                DataSettings()
+            }
+            Tab("History", systemImage: "clock.arrow.circlepath") {
+                HistorySettings()
+            }
+        }
+        .frame(width: 580, height: 500)
     }
 }
 

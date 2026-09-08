@@ -494,39 +494,52 @@ update checkboxes here → `git commit -m "Phase N: …"`. Never start phase N+1
 - Deviation: `Settings ▸ History` ships as the whole Settings window rather than one tab of it; Phase 12 adds the
   other panes and the tab strip (D29).
 
-### Phase 9 — Sync via data folder  ☐
+### Phase 9 — Sync via data folder  ☑
 Goal: pointing the data folder at `iCloud Drive/Postfrau` (or Google Drive, Dropbox, a git checkout) makes two Macs share collections and environments, without Postfrau ever running a server.
-- [ ] `DataFolder`: resolves the current root from `settings.json` (security-scoped bookmark → `startAccessingSecurityScopedResource`),
+- [x] `DataFolder`: resolves the current root from `settings.json` (security-scoped bookmark → `startAccessingSecurityScopedResource`),
       falls back to the default folder if the bookmark is stale, and exposes `status` (ok / missing / unreadable / stale bookmark).
-- [ ] Settings ▸ Data pane: current path + provider badge (detect iCloud Drive `Mobile Documents/com~apple~CloudDocs`,
+- [x] Settings ▸ Data pane: current path + provider badge (detect iCloud Drive `Mobile Documents/com~apple~CloudDocs`,
       Google Drive `CloudStorage/GoogleDrive-*`, Dropbox `CloudStorage/Dropbox`, plain folder), buttons:
       **Use iCloud Drive…** (opens `NSOpenPanel` at the iCloud Drive root with "Postfrau" pre-suggested, `canCreateDirectories`),
       **Choose Folder…**, **Reveal in Finder**, **Use Default Location**. Toggle: **Sync secrets via iCloud Keychain**.
-- [ ] Relocation flow (sheet): if the chosen folder is empty → *Move data here*; if it already contains
+- [x] Relocation flow (sheet): if the chosen folder is empty → *Move data here*; if it already contains
       `postfrau-workspace.json` → *Use the data in this folder* (current local data is left in place and a
-      backup zip of it is written next to it) or *Merge* (import collections/environments with ids not present;
+      backup of it is written) or *Merge* (import collections/environments with ids not present;
       same-id conflicts keep the newer `revision` and write a conflict copy). Never delete the old folder.
-- [ ] `FolderWatcher`: `NSFilePresenter` on the data folder (gets iCloud/coordinated change notices) plus a
+      *(The backup is one JSON file per document in `conflicts/`, not a zip: the same copies the merge path
+      already writes, and individually openable. See D33.)*
+- [x] `FolderWatcher`: `NSFilePresenter` on the data folder (gets iCloud/coordinated change notices) plus a
       `DispatchSource` on the directory for plain folders; coalesces events for 500 ms, then diffs the folder:
       new / changed / removed files by `(mtime, sha256)` vs the store's last-written record.
-- [ ] `ConflictResolver`: foreign change to a file with no unsaved local edits → reload in place (open tabs update,
+- [x] `ConflictResolver`: foreign change to a file with no unsaved local edits → reload in place (open tabs update,
       drafts untouched). Foreign change while the same collection has unsaved local edits → keep local, save the
       foreign version to `LOCAL/conflicts/<name>-<host>-<date>.json`, show a non-modal banner
       "Acme API changed on another Mac" with *Keep mine* / *Take theirs* / *Show both* (opens the copy as a read-only collection).
       Removed file → collection becomes "missing" in the sidebar with *Restore from memory* for one session.
-- [ ] iCloud specifics: request download of `.icloud` placeholders on launch (`startDownloadingUbiquitousItem`),
+- [x] iCloud specifics: request download of `.icloud` placeholders on launch (`startDownloadingUbiquitousItem`),
       show a per-collection "downloading" spinner; ignore `NSFileVersion` conflict versions Apple creates (we make our own copies);
       never hold a coordinated read open across an await.
-- [ ] Secrets: when the iCloud Keychain toggle changes, re-write all secret items with the new `kSecAttrSynchronizable`;
+- [x] Secrets: when the iCloud Keychain toggle changes, re-write all secret items with the new `kSecAttrSynchronizable`;
       confirm in a test on this machine that a synchronizable item is readable back (behavior differs for unsigned builds — record findings in `docs/decisions.md`).
-- [ ] Status bar shows a sync-folder chip (provider icon, "watching", last external change time); clicking opens the Data pane.
-- [ ] Tests (Core): watcher diff logic with a temp folder mutated by a second process (`Process` running `cp`/`rm`),
+- [x] Status bar shows a sync-folder chip (provider icon, "watching", last external change time); clicking opens the Data pane.
+- [x] Tests (Core): watcher diff logic with a temp folder mutated by a second process (`Process` running `cp`/`rm`),
       conflict copy naming, merge rules, stale bookmark fallback. Manual: two app instances on one Mac
       (`open -n` with `POSTFRAU_LOCAL_ROOT` env override for the second) pointed at the same folder edit the same collection.
 - Acceptance: choose an iCloud Drive folder; on a second Mac (or the second instance) the collection appears within
   a few seconds of iCloud finishing upload; editing on both sides produces one conflict banner and no lost data;
   removing the folder while running degrades gracefully to the "missing" status without a crash; secrets are present on
   the second machine when the Keychain toggle is on and absent (masked, empty) when off.
+- Verified: two instances on this Mac (`open -n --local-root-name`) pointed at one folder both picked up an
+  external rename within ~3 s; the second instance adopted the first's collection instead of installing its own
+  sample; removing a collection file put up the "no longer in the data folder" banner with the sidebar marker;
+  deleting the whole folder while running turned the status chip to "folder unavailable" without a crash, and
+  restoring the folder brought it back with no relaunch.
+- Deviation: `dataFolderPath` is now a real fallback when there is no bookmark, because a bookmark belongs to the
+  process that made it — a second instance, and the Phase 11 CLI, have only the path (D31).
+- Deviation: a folder that disappears is one event, not one per document, and is recovered by polling rather than
+  by the watcher — a deleted directory sends no further events (D32).
+- Not verified: the conflict banner itself has only been exercised by test. Producing one by hand needs a
+  collection held in an unsaved state while another process writes it, which the UI autosaves away in 300 ms.
 
 ### Phase 10 — Import / Export  ☐
 - [ ] `PostmanV21Importer`: `info`, nested `item[]`, `request.url` as string OR object (`raw`, `host[]`,

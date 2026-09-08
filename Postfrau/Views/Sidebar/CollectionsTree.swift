@@ -43,6 +43,36 @@ struct CollectionRow: View {
     @State private var isConfirmingDelete = false
     @FocusState private var renameFocused: Bool
 
+    private var isMissing: Bool {
+        state.missingCollections.contains { $0.id == collection.id }
+    }
+
+    private var isDownloading: Bool {
+        state.downloadingDocuments.contains(collection.id)
+    }
+
+    /// Says what sync is doing to this collection: still coming down from iCloud, or gone from
+    /// the folder entirely. The banner carries the actions; this is only the marker.
+    @ViewBuilder
+    private var syncMarker: some View {
+        if isDownloading {
+            ProgressView()
+                .controlSize(.mini)
+                .help("Downloading from iCloud")
+        } else if isMissing {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.caption)
+                .foregroundStyle(.orange)
+                .help("This collection is no longer in the data folder")
+        }
+    }
+
+    private var syncDescription: String {
+        if isDownloading { return ", downloading from iCloud" }
+        if isMissing { return ", missing from the data folder" }
+        return ""
+    }
+
     var body: some View {
         DisclosureGroup(
             isExpanded: state.expansionBinding(for: collection.id, forcedOpen: forcedOpen)
@@ -70,9 +100,10 @@ struct CollectionRow: View {
                         .lineLimit(1)
                 }
                 Spacer(minLength: 0)
+                syncMarker
             }
             .accessibilityElement(children: isRenaming ? .contain : .ignore)
-            .accessibilityLabel("Collection \(collection.name)")
+            .accessibilityLabel("Collection \(collection.name)\(syncDescription)")
             .contentShape(.rect)
             .onTapGesture(count: 2) { state.openCollectionEditor(collection.id) }
             .contextMenu { menu }
