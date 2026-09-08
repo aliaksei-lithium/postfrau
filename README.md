@@ -1,6 +1,19 @@
-# Postfrau
+<p align="center">
+  <img src="docs/images/icon.png" width="132" alt="">
+</p>
 
-An HTTP client for macOS 26. Collections are JSON files in a folder you choose — no account, no cloud, nothing uploaded.
+<h1 align="center">Postfrau</h1>
+
+<p align="center">
+  An HTTP client for macOS 26.<br>
+  Collections are JSON files in a folder you choose — no account, no cloud, nothing uploaded.
+</p>
+
+<p align="center">
+  <a href="https://github.com/aliaksei-lithium/postfrau/releases/latest"><img src="https://img.shields.io/github/v/release/aliaksei-lithium/postfrau?color=6b4fe8&label=download" alt="Latest release"></a>
+  <img src="https://img.shields.io/badge/macOS-26-6b4fe8" alt="macOS 26">
+  <img src="https://img.shields.io/badge/licence-MIT-6b4fe8" alt="MIT licence">
+</p>
 
 ![Postfrau](docs/images/main.png)
 
