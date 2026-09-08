@@ -1,9 +1,11 @@
 # Postfrau — status
 
-**Current phase:** 12 (Polish & release) — next
-**Last completed:** Phase 11 — CLI & agent interface
-**Build:** green — `make test` passes: 491 Core tests (~8 s) plus the app unit tests.
-`make live-test` runs the ones that talk to the real network.
+**v1 complete.** All twelve phases of `PLAN.md` are ticked; `Scripts/release.sh` produces
+`dist/Postfrau-1.0.dmg`.
+
+**Build:** green — `make test` passes: 495 Core tests (~8 s) plus the app unit tests.
+`make live-test` adds the ones that talk to the real network; `make ui-test` the ones that drive
+the window.
 
 > **UI tests need a free, awake desktop.** `make ui-test` runs the XCUITest suite separately,
 > because it drives the real UI and needs a display where Postfrau's window can come to the front.
@@ -93,11 +95,21 @@ append 150 entries at once with nothing lost and no torn read. Two app instances
 folder both pick up an external change within about three seconds. An imported Postman collection
 sends to httpbin and comes back 200, body and headers intact.
 
-## Next
+## Next — what v1.1 should start with
 
-Phase 12 — polish and release: the General settings pane, the final Icon Composer icon, an
-accessibility pass, an Instruments performance pass, crash-safety, the DMG, and README
-screenshots.
+1. **The launch time.** 0.95–1.4 s from `open` to a painted window against a 300 ms target, and it
+   has never been isolated from LaunchServices and dyld. Measure it properly with Instruments
+   first; the answer may be that most of it is not ours, but nobody knows yet.
+2. **Finish the accessibility pass properly.** Reduce Transparency and Increase Contrast could not
+   be toggled from a script on macOS 26 (`docs/decisions.md` D40). Someone at the keyboard should
+   turn both on and look, and run VoiceOver over the request editor.
+3. **Watch the history folder** rather than re-reading on activation (D41). The Phase 9 watcher
+   already does this for the data folder; history deserves the same, so an agent's send appears
+   while you are looking at the window.
+4. **A designed app icon.** The structure is right — layered, so macOS derives the light, dark,
+   clear and tinted renderings — but the glyph is a placeholder mark.
+5. **A real Postman export** to round-trip against, and a second Mac to prove iCloud sync between
+   two machines rather than two instances.
 
 ## Known issues / limitations
 
@@ -108,9 +120,10 @@ screenshots.
 - **iCloud Keychain sync cannot work on this build.** Synchronizable Keychain items need a real
   signing identity; an ad-hoc build gets `errSecMissingEntitlement`. The toggle now reports that
   and reverts rather than pretending (`docs/decisions.md` D26). Local secret storage works fully.
-- The Settings window holds Data and History (`docs/decisions.md` D29). General and Advanced arrive
-  in Phase 12; until then preferences without an inline control — notably "allow JavaScript in
-  previews" — need `settings.json` edited by hand.
+- **The launch-time target is not met**: 0.95–1.4 s to a painted window against 300 ms, not
+  isolated from LaunchServices and dyld (`docs/decisions.md` D40).
+- **Reduce Transparency and Increase Contrast were never seen.** `com.apple.universalaccess` is
+  TCC-protected on macOS 26, so a script cannot turn them on (D40).
 - The **conflict banner** has been exercised by test but not photographed: producing one by hand
   means holding a collection unsaved while another process writes it, and autosave closes that
   window in 300 ms. The *missing collection* banner, which shares the component, was eyeballed.

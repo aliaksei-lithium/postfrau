@@ -48,6 +48,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// itself raise a window, so a window left behind another app's stays there — the menu bar
     /// says Postfrau while the screen shows something else.
     func applicationDidBecomeActive(_ notification: Notification) {
+        // The `postfrau` CLI writes into the same history folder, so coming back from a terminal
+        // is exactly when the sidebar is most likely to be out of date.
+        if let state { Task { await state.refreshHistoryIfChanged() } }
         bringMainWindowForward()
     }
 

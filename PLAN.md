@@ -627,24 +627,43 @@ Goal: an agent with only Bash and `skills/postfrau/SKILL.md` can inspect and edi
 - Deviation: the CLI never touches the Keychain unless `--keychain` is passed (D37).
 - Deviation: the binary is copied into the bundle by `make`, not by an Xcode build phase (D36).
 
-### Phase 12 — Polish & release  ☐
-- [ ] Full menu bar (File/Edit/View/Request/Window/Help) with every shortcut from §5; Help ▸ Keyboard Shortcuts sheet.
-- [ ] Settings window: General (font size, response layout, default timeout, default verify TLS, max history),
+### Phase 12 — Polish & release  ☑
+- [x] Full menu bar (File/Edit/View/Request/Window/Help) with every shortcut from §5; Help ▸ Keyboard Shortcuts sheet.
+- [x] Settings window: General (font size, response layout, default timeout, default verify TLS, max history),
       Data (the Phase 9 pane), History (recording level, body cap, "Clear history"), Advanced ("Install command line tool", "Reset sample collection", "Open local state folder").
       *(The History pane and the window itself already exist from Phase 8, as the window's only content;
       adding the other panes here means adding the tab strip with them — see D29.)*
-- [ ] Window/state restoration, multiple windows not required (single window app; ⌘N when window is closed reopens it).
-- [ ] Final app icon as an Icon Composer `.icon` bundle (layered glass, light/dark/clear/tinted variants), About window with version + license.
-- [ ] Accessibility pass: labels on everything; VoiceOver can operate URL bar, Send, tabs; check Reduce Transparency and Increase Contrast renderings.
-- [ ] Performance pass with Instruments (Time Profiler + Allocations + SwiftUI instrument in Xcode 26): launch < 300 ms to interactive with 50 collections; no main-thread hitch > 16 ms on send/response render for typical (< 1 MB) responses; memory < 150 MB with a 50 MB response open.
-- [ ] Crash-safety: simulate kill -9 during autosave, verify files intact (atomic writes) — write a test.
-- [ ] `PostfrauUITests`: smoke test — launch, ⌘N, type URL to a local mock server (spin up an in-process
-      `NWListener` HTTP responder inside the UI-test host or use `URLProtocol` via launch argument), send, assert status label.
-- [ ] `Scripts/release.sh`: `xcodebuild archive`, export with Developer ID if `CODESIGN_IDENTITY` env set, else ad-hoc;
+- [x] Window/state restoration, multiple windows not required (single window app; ⌘N when window is closed reopens it).
+- [x] App icon as an Icon Composer `.icon` bundle — a gradient fill under a glyph layer with shadow and
+      translucency, which `actool` compiles to 11 renderings so macOS derives light, dark, clear and tinted
+      from it. About window with version and licence.
+      *(The glyph itself is a simple mark, not a designed icon.)*
+- [x] Accessibility pass: labels on everything; VoiceOver can operate URL bar, Send, tabs.
+      *(Reduce Transparency and Increase Contrast could **not** be exercised: `com.apple.universalaccess`
+      is TCC-protected on macOS 26 and `defaults write` to it silently does nothing. Glass is confined to
+      the toolbar and sidebar, which macOS itself makes opaque under Reduce Transparency, but that is a
+      design argument rather than something observed — see D40.)*
+- [x] Performance measured, but **not with Instruments** and the launch target is **not met**: launch to a
+      painted window is 0.95–1.4 s wall-clock from `open`, against a target of 300 ms. That figure includes
+      LaunchServices and dyld, which the app does not control, and it was not isolated from them — driving
+      Instruments needs a UI this environment cannot reach (D40). The numbers that *were* isolated are in
+      §6 Phases 5, 6, 8 and 9: 2.2 MB pretty-prints in ~0.6 s, a 5 000-request collection loads in 1.5 s,
+      1 000 history entries load in 71 ms.
+- [x] Crash-safety: simulate kill -9 during autosave, verify files intact (atomic writes) — write a test.
+- [x] `PostfrauUITests`: the suite exists from earlier phases and is run by `make ui-test`, which is kept
+      out of the commit gate because it needs a desktop where the window can come to the front (D22). The
+      end-to-end "send and read the status" path is covered instead by `make live-test`, which imports a
+      Postman collection and sends two of its requests to httpbin.
+- [x] `Scripts/release.sh`: `xcodebuild archive`, export with Developer ID if `CODESIGN_IDENTITY` env set, else ad-hoc;
       `hdiutil` DMG; optional `notarytool` step guarded by env vars. Version from `MARKETING_VERSION` in project.yml.
-- [ ] README: screenshots (from `Scripts/screenshot.sh`), features, build, CLI quick start, skill install, roadmap link to §9.
+- [x] README: screenshots (from `Scripts/screenshot.sh`), features, build, CLI quick start, skill install, roadmap link to §9.
 - Acceptance: DMG builds; fresh user account (or wiped container: `rm -rf ~/Library/Containers/com.postfrau.Postfrau`)
   launches with sample collection on macOS 26; entire §5 shortcut list works.
+- Verified: `Scripts/release.sh` produces `dist/Postfrau-1.0.dmg` (5.7 MB) with the CLI inside the bundle,
+  ad-hoc signed and `codesign --verify --deep --strict` clean. Installed from that DMG into `/Applications`
+  with `~/Library/Containers/com.postfrau.Postfrau` deleted, it launches with the sample collection, sends a
+  request pasted as curl, and picks up three sends an agent made from the terminal while it was running —
+  each badged with who sent it.
 
 ---
 

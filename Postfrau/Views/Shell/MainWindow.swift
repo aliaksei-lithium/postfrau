@@ -29,6 +29,17 @@ struct MainWindow: View {
         .sheet(item: $state.importReport) { report in
             ImportReportSheet(report: report) { state.importReport = nil }
         }
+        .sheet(isPresented: $state.isShortcutsPresented) {
+            ShortcutsSheet { state.isShortcutsPresented = false }
+        }
+        .sheet(isPresented: $state.isAboutPresented) {
+            AboutWindow()
+                .overlay(alignment: .topTrailing) {
+                    Button("Done") { state.isAboutPresented = false }
+                        .keyboardShortcut(.defaultAction)
+                        .padding(12)
+                }
+        }
         .navigationTitle(state.selectedTab?.title ?? "Postfrau")
         .toolbar {
             ToolbarSpacer(.flexible)

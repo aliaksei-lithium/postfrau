@@ -140,26 +140,7 @@ struct AppCommands: Commands {
             }
         }
 
-        CommandMenu("History") {
-            CommandButton(
-                title: "Open Last Send", state: state,
-                isEnabled: { !$0.historyEntries.isEmpty },
-                action: { state in
-                    if let entry = state.historyEntries.first { state.openHistoryEntry(entry) }
-                })
-            .keyboardShortcut("h", modifiers: [.command, .shift])
-
-            CommandButton(
-                title: "Show History", state: state,
-                action: { $0.sidebarSection = .history })
-
-            Divider()
-
-            CommandButton(
-                title: "Delete All History…", state: state,
-                isEnabled: { !$0.historyEntries.isEmpty },
-                action: { $0.isConfirmingClearHistory = true })
-        }
+        HistoryAndHelpCommands(state: state)
 
         CommandGroup(after: .windowList) {
             CommandButton(title: "Next Tab", state: state) { $0.selectNextTab() }
@@ -193,4 +174,47 @@ struct AppCommands: Commands {
 /// The identifier of the environments window, shared by the scene and the menu command.
 enum EnvironmentsWindowID {
     static let value = "environments"
+}
+
+/// The History, Help and About menus.
+///
+/// Split out because `CommandsBuilder` takes at most ten statements, and the app has more menus
+/// than that. Composing `Commands` types is the supported way to get past it.
+struct HistoryAndHelpCommands: Commands {
+    var state: AppState?
+
+    var body: some Commands {
+        CommandGroup(replacing: .appInfo) {
+            CommandButton(title: "About Postfrau", state: state) { $0.isAboutPresented = true }
+        }
+
+        CommandGroup(replacing: .help) {
+            CommandButton(title: "Keyboard Shortcuts", state: state) {
+                $0.isShortcutsPresented = true
+            }
+            .keyboardShortcut("/", modifiers: [.command])
+        }
+
+        CommandMenu("History") {
+            CommandButton(
+                title: "Open Last Send", state: state,
+                isEnabled: { !$0.historyEntries.isEmpty },
+                action: { state in
+                    if let entry = state.historyEntries.first { state.openHistoryEntry(entry) }
+                })
+            .keyboardShortcut("h", modifiers: [.command, .shift])
+
+            CommandButton(
+                title: "Show History", state: state,
+                action: { $0.sidebarSection = .history })
+
+            Divider()
+
+            CommandButton(
+                title: "Delete All History…", state: state,
+                isEnabled: { !$0.historyEntries.isEmpty },
+                action: { $0.isConfirmingClearHistory = true })
+        }
+
+    }
 }

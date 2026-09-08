@@ -479,3 +479,33 @@ never called in a SwiftUI app — the URL arrives and nothing happens. Diagnosed
 Registering the scheme also has to happen in `project.yml`, not in `Info.plist`: XcodeGen
 regenerates that file from the `info.properties` block on every `make gen`, silently discarding
 edits made to it directly.
+
+## D40 — Two Phase 12 checks this environment cannot perform
+
+**What.** Two items are ticked with the work done but the *verification* missing, and both say so
+in `PLAN.md` rather than being quietly claimed.
+
+**Reduce Transparency and Increase Contrast.** `com.apple.universalaccess` is TCC-protected on
+macOS 26: `defaults write` to it returns success and changes nothing, and there is no scriptable
+route to the toggle. Glass is confined to the toolbar and sidebar — surfaces macOS itself renders
+opaque under Reduce Transparency — and content is flat everywhere, so the design should hold. That
+is an argument, not an observation, and it is recorded as one.
+
+**The Instruments pass.** Time Profiler, Allocations and the SwiftUI instrument need a GUI this
+session cannot drive. What was measured instead is wall-clock launch: 0.95–1.4 s from `open` to a
+painted window, against the plan's 300 ms. That figure includes LaunchServices resolving the
+bundle and dyld loading it, neither of which the app controls, and it was not isolated from them —
+so it is reported as what it is rather than being explained away. The targets that *were* isolated,
+in Phases 5, 6, 8 and 9, are met.
+
+## D41 — History refreshes when the app becomes active
+
+**What.** `applicationDidBecomeActive` asks `AppState.refreshHistoryIfChanged()`, which compares a
+directory count and re-reads only when it has moved.
+
+**Why.** Phase 11 promises that what an agent does "shows up in the app". It did not: the app read
+history once at launch, so sends the CLI made while the app sat open were on disk and invisible
+until a relaunch. Found by doing exactly what the feature is for — running three `postfrau send`
+commands from a terminal beside the running app. Coming back from that terminal is precisely the
+moment the sidebar is most likely to be stale, which is why activation is the trigger; a directory
+listing is far cheaper than decoding every entry, so the common case costs nothing.

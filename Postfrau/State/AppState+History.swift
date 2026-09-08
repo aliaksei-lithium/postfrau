@@ -40,6 +40,7 @@ extension AppState {
             .appending(path: "history.jsonl", directoryHint: .notDirectory)
         await history.migrateLegacyLog(at: legacy)
         historyEntries = await history.load(limit: settings.maxHistoryEntries)
+        lastKnownHistoryCount = await history.count()
         reattachRecordedTabs()
     }
 
@@ -48,7 +49,7 @@ extension AppState {
     /// The exchange is not written into the UI state — it is already in the history log, and
     /// duplicating a capped body into `ui-state.json` on every quit would be wasteful. Instead the
     /// tab remembers which entry it was showing and looks it up once history has been read.
-    private func reattachRecordedTabs() {
+    func reattachRecordedTabs() {
         let byID = Dictionary(historyEntries.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         for tab in tabs {
             guard let id = tab.restoredHistoryEntryID, let entry = byID[id] else { continue }
@@ -58,6 +59,20 @@ extension AppState {
             tab.response = Self.recordedResponse(for: entry)
             tab.selectedResponseTab = entry.responseBody == nil ? .headers : .pretty
         }
+    }
+
+    /// Re-reads history if something else has written to it.
+    ///
+    /// The `postfrau` CLI writes into the same folder, so an agent's sends land while the app is
+    /// sitting there. Checked when the app becomes active — coming back from the terminal is
+    /// exactly when the sidebar would otherwise be stale — and only re-read when the count has
+    /// actually moved, since a directory listing is far cheaper than decoding every entry.
+    func refreshHistoryIfChanged() async {
+        let onDisk = await history.count()
+        guard onDisk != lastKnownHistoryCount else { return }
+        lastKnownHistoryCount = onDisk
+        historyEntries = await history.load(limit: settings.maxHistoryEntries)
+        reattachRecordedTabs()
     }
 
     // MARK: - Recording
@@ -80,6 +95,7 @@ extension AppState {
     func appendHistory(_ entry: HistoryEntry) async {
         guard entry.recordLevel != .off else { return }
         try? await history.append(entry)
+        lastKnownHistoryCount += 1
         historyEntries.insert(entry, at: 0)
         if historyEntries.count > settings.maxHistoryEntries {
             historyEntries.removeLast(historyEntries.count - settings.maxHistoryEntries)
@@ -90,11 +106,13 @@ extension AppState {
 
     func deleteHistoryEntry(_ entry: HistoryEntry) {
         historyEntries.removeAll { $0.id == entry.id }
+        lastKnownHistoryCount = max(0, lastKnownHistoryCount - 1)
         enqueueHistoryWork { await $0.delete(id: entry.id) }
     }
 
     func clearHistory() {
         historyEntries = []
+        lastKnownHistoryCount = 0
         enqueueHistoryWork { await $0.clear() }
     }
 

@@ -75,6 +75,9 @@ final class AppState {
     var downloadingDocuments: Set<UUID> = []
     /// What the last import did, shown in a sheet. Nil when there is nothing worth saying.
     var importReport: ImportReport?
+    /// Help ▸ Keyboard Shortcuts, and the About window.
+    var isShortcutsPresented = false
+    var isAboutPresented = false
     /// The security-scoped URL whose access is open for the life of the process.
     @ObservationIgnored var securityScopedRoot: URL?
     @ObservationIgnored var folderWatcher: FolderWatcher?
@@ -85,6 +88,9 @@ final class AppState {
     /// looks like missing history.
     var historySourceFilter: HistorySourceFilter = .all
     var isConfirmingClearHistory = false
+    /// How many entries were on disk when history was last read, so a refresh can be skipped
+    /// when nothing has changed.
+    @ObservationIgnored var lastKnownHistoryCount = 0
     /// Bumped by ⌘L; the window watches it and moves focus into the URL field.
     private(set) var urlFocusRequests = 0
     /// Set when a menu command wants to close a tab that has unsaved work; the tab bar owns the

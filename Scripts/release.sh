@@ -30,6 +30,25 @@ xcodebuild -project Postfrau.xcodeproj -scheme Postfrau -configuration Release \
 APP="$ARCHIVE/Products/Applications/Postfrau.app"
 [ -d "$APP" ] || { echo "Archive did not produce $APP" >&2; exit 1; }
 
+# The command line tool ships inside the bundle, where Settings ▸ Advanced symlinks it from.
+# Contents/Helpers, never Contents/MacOS: macOS filesystems are case-insensitive, so a file
+# called `postfrau` beside the app's own `Postfrau` executable overwrites it.
+echo "▸ Building the command line tool…"
+( cd Packages/PostfrauCore && swift build -c release --product postfrau >/dev/null )
+CLI="$(cd Packages/PostfrauCore && swift build -c release --show-bin-path)/postfrau"
+mkdir -p "$APP/Contents/Helpers"
+cp "$CLI" "$APP/Contents/Helpers/postfrau"
+
+# Adding a binary invalidates the archive's signature, so the helper is signed and then the whole
+# bundle is signed again. Ad-hoc ("-") works without a Developer account, which is the default.
+codesign --force --options runtime --timestamp=none \
+  --sign "$IDENTITY" "$APP/Contents/Helpers/postfrau"
+codesign --force --options runtime --timestamp=none \
+  --entitlements Postfrau/Resources/Postfrau.entitlements \
+  --sign "$IDENTITY" "$APP"
+codesign --verify --deep --strict "$APP" || {
+  echo "The signed app does not verify." >&2; exit 1; }
+
 cp -R "$APP" "$APPDIR/Postfrau.app"
 ln -s /Applications "$APPDIR/Applications"
 
