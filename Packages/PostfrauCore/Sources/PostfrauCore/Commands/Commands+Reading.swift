@@ -60,13 +60,20 @@ extension CommandRunner {
         let workspace = try await load()
 
         guard let path, !path.isEmpty else {
-            return workspace.collections.map { collection in
-                ListedItem(
-                    path: NamePath(components: [collection.name]).description,
-                    name: collection.name,
-                    kind: "collection",
-                    id: collection.id)
+            var out: [ListedItem] = []
+            for collection in workspace.collections {
+                let base = NamePath(components: [collection.name])
+                out.append(ListedItem(
+                    path: base.description, name: collection.name, kind: "collection",
+                    id: collection.id))
+                // Without this, `ls --tree` with no path silently ignored `recursive` and showed
+                // only collection names — leaving no way to see the requests at all.
+                if recursive {
+                    out.append(contentsOf: rows(
+                        for: collection.items, under: base, recursive: true, depth: 1))
+                }
             }
+            return out
         }
 
         let resolved = try await resolve(path)
@@ -114,6 +121,74 @@ extension CommandRunner {
             }
         }
         return out
+    }
+
+    // MARK: - find
+
+    /// Every request whose name, path, description, method or URL matches every word of `query`.
+    ///
+    /// This is how anything without the workspace in front of it finds a request: an agent is
+    /// told "run the projection recovery", not given a path. Words are matched independently and
+    /// in any order, so "recovery projection" finds `Projections/Force recovery`.
+    ///
+    /// Substrings, not fuzzy matching, when a substring hits: an agent picking a request to fire
+    /// at production wants a predictable rule, not the closest thing by edit distance. Fuzzy
+    /// ranking is the fallback for when nothing matches literally, which is where a typo lands.
+    public func find(_ query: String, limit: Int = 20) async throws -> [FoundItem] {
+        let workspace = try await load()
+        let terms = query.lowercased().split(separator: " ").map(String.init).filter { !$0.isEmpty }
+        guard !terms.isEmpty else { return [] }
+
+        var candidates: [(item: FoundItem, haystack: String, score: Int)] = []
+        for collection in workspace.collections {
+            collect(
+                collection.items, under: NamePath(components: [collection.name]),
+                into: &candidates)
+        }
+
+        var matched: [(FoundItem, Int)] = []
+        for candidate in candidates
+        where terms.allSatisfy({ candidate.haystack.contains($0) }) {
+            matched.append((candidate.item, candidate.score))
+        }
+
+        if matched.isEmpty {
+            // Nothing matched literally, so fall back to ranking the whole haystack fuzzily.
+            return FuzzyMatcher.rank(candidates, query: query) { $0.haystack }
+                .prefix(limit)
+                .map { $0.item.item }
+        }
+        return matched
+            .sorted { $0.1 == $1.1 ? $0.0.path < $1.0.path : $0.1 > $1.1 }
+            .prefix(limit)
+            .map(\.0)
+    }
+
+    private func collect(
+        _ items: [CollectionItem], under base: NamePath,
+        into out: inout [(item: FoundItem, haystack: String, score: Int)]
+    ) {
+        for item in items {
+            let path = base.appending(item.name)
+            switch item {
+            case .folder(let folder):
+                collect(folder.items, under: path, into: &out)
+            case .request(let request):
+                let found = FoundItem(
+                    path: path.description, name: request.name,
+                    method: request.method.rawValue, url: request.url,
+                    description: request.description)
+                // A hit in the name is worth more than one in a URL: names are what people
+                // search by, and every request in a collection shares most of its URL.
+                let score =
+                    (request.name.count) + (request.description?.isEmpty == false ? 2 : 0)
+                out.append((
+                    found,
+                    [path.description, request.name, request.method.rawValue, request.url,
+                     request.description ?? ""].joined(separator: " ").lowercased(),
+                    score))
+            }
+        }
     }
 
     // MARK: - get
@@ -214,5 +289,24 @@ extension CommandRunner {
             throw CommandError.notFound("No environment called “\(name)”.")
         }
         return found
+    }
+}
+
+/// One row of `postfrau find`: enough to choose a request without opening it.
+public struct FoundItem: Sendable, Hashable, Codable {
+    public var path: String
+    public var name: String
+    public var method: String
+    public var url: String
+    public var description: String?
+
+    public init(
+        path: String, name: String, method: String, url: String, description: String? = nil
+    ) {
+        self.path = path
+        self.name = name
+        self.method = method
+        self.url = url
+        self.description = description
     }
 }

@@ -40,6 +40,67 @@ struct CommandRunnerTests {
         #expect(all.map(\.depth) == [0, 1, 2, 2, 0])
     }
 
+    /// Without a path, `recursive` used to be ignored outright — `ls --tree` showed collection
+    /// names and nothing else, leaving no way to see any request.
+    @Test func aRecursiveListWithNoPathWalksEveryCollection() async throws {
+        let temp = TempDirectory()
+        let runner = try await makeRunner(at: temp.url)
+
+        let all = try await runner.list(path: nil, recursive: true)
+        #expect(all.map(\.name) == ["Acme API", "API", "Users", "List", "Create", "Health"])
+        #expect(all.map(\.depth) == [0, 1, 2, 3, 3, 1])
+        #expect(all.filter { $0.kind == "request" }.count == 3)
+    }
+
+    // MARK: - Finding
+
+    @Test func findMatchesEveryWordInAnyOrder() async throws {
+        let temp = TempDirectory()
+        let runner = try await makeRunner(at: temp.url)
+
+        let byName = try await runner.find("list")
+        #expect(byName.map(\.name).contains("List"))
+
+        // Words are matched independently: the order they are typed in does not matter, and they
+        // may come from different fields — this is the case an agent hits when it is told a job
+        // in words rather than given a path.
+        let acrossFields = try await runner.find("users list")
+        #expect(acrossFields.first?.path == "Acme API/API/Users/List")
+        #expect(try await runner.find("list users").first?.path == acrossFields.first?.path)
+    }
+
+    @Test func findMatchesTheDescriptionAndTheURL() async throws {
+        let temp = TempDirectory()
+        let folder = DataFolder(root: temp.url.appending(path: "Data"), needsCoordination: false)
+        try folder.prepare()
+        let store = WorkspaceStore(dataFolder: folder, localRoot: temp.url)
+        var collection = RequestCollection(name: "Deposits")
+        var request = RequestItem(
+            name: "Backfill", method: .post, url: "https://api.test/v2/projections/recovery")
+        request.description = "Force recalculation of projections after an incident."
+        collection.items = [.request(request)]
+        try await store.save(collection: collection)
+        let runner = CommandRunner(
+            store: store, history: HistoryStore(root: temp.url.appending(path: "history")))
+
+        #expect(try await runner.find("projections recovery").first?.name == "Backfill")
+        #expect(try await runner.find("recalculation incident").first?.name == "Backfill")
+        #expect(try await runner.find("force projections").first?.name == "Backfill")
+    }
+
+    @Test func findReturnsNothingWhenAWordIsMissing() async throws {
+        let temp = TempDirectory()
+        let runner = try await makeRunner(at: temp.url)
+        // "list" exists, "zzzz" does not, and every word has to match.
+        #expect(try await runner.find("list zzzzqqq").isEmpty)
+    }
+
+    @Test func findRespectsItsLimit() async throws {
+        let temp = TempDirectory()
+        let runner = try await makeRunner(at: temp.url)
+        #expect(try await runner.find("a", limit: 1).count <= 1)
+    }
+
     @Test func everyListedPathResolvesBack() async throws {
         let temp = TempDirectory()
         let runner = try await makeRunner(at: temp.url)

@@ -17,7 +17,7 @@ enum RemoteAPI {
     }
 
     /// The verbs that work remotely. Anything else gets told plainly that it does not.
-    static let supportedVerbs: Set<String> = ["ls", "get", "run", "send", "version"]
+    static let supportedVerbs: Set<String> = ["ls", "find", "get", "run", "send", "version"]
 
     static func fromEnvironment() -> Endpoint? {
         let environment = ProcessInfo.processInfo.environment
@@ -54,6 +54,19 @@ enum RemoteAPI {
                 if let path = arguments.positional(0) { query["path"] = path }
                 let result: LocalAPI.ListResult = try await get("/v1/list", query, endpoint)
                 return Browse.render(result.items, arguments, out)
+
+            case "find":
+                let terms = arguments.positional.joined(separator: " ")
+                guard !terms.isEmpty else {
+                    out.error(
+                        "find needs something to look for: `postfrau find projection recovery`")
+                    return .usage
+                }
+                let query = [
+                    "q": terms, "limit": arguments.value("--limit") ?? "20",
+                ]
+                let result: LocalAPI.FindResult = try await get("/v1/find", query, endpoint)
+                return Browse.render(result.items, out)
 
             case "get":
                 guard let path = arguments.positional(0) else {

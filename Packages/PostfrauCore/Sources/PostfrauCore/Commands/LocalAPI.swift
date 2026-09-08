@@ -9,8 +9,8 @@ import Security
 /// socket and does the file access itself, and the CLI forwards to it when
 /// `POSTFRAU_API_TOKEN` is set.
 ///
-/// Deliberately small: list, detail, run, send. Enough to find a request and fire it, which is
-/// what an agent needs. Editing a workspace still wants a real folder.
+/// Deliberately small: list, find, detail, run, send. Enough to find a request and fire it,
+/// which is what an agent needs. Editing a workspace still wants a real folder.
 public enum LocalAPI {
     /// Chosen to be memorable and out of the way of the usual dev-server ports.
     public static let defaultPort = 7717
@@ -62,6 +62,12 @@ public enum LocalAPI {
     public struct ListResult: Codable, Sendable {
         public var items: [ListedItem]
         public init(items: [ListedItem]) { self.items = items }
+    }
+
+    /// `GET /v1/find?q=&limit=`
+    public struct FindResult: Codable, Sendable {
+        public var items: [FoundItem]
+        public init(items: [FoundItem]) { self.items = items }
     }
 
     /// `POST /v1/run`

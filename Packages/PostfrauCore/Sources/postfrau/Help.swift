@@ -23,6 +23,7 @@ enum Help {
 
         \(out.bold("BROWSING"))
           ls [path] [--tree]              what is in a collection or folder
+          find WORDS… [--limit N]         search names, paths, descriptions and URLs
           get <path> [--var k=v]          one request, and what it resolves to
           schema [collection|request|environment|history]
           validate <file>                 what is this file, and what would be lost?
@@ -69,8 +70,8 @@ enum Help {
           --help            help for a command
 
         \(out.bold("WHEN THE WORKSPACE IS UNREADABLE"))
-          Set POSTFRAU_API_TOKEN (Settings ▸ Advanced ▸ Local API) and ls, get, run, send and
-          version ask the running app over 127.0.0.1 instead of the filesystem — for a sandbox
+          Set POSTFRAU_API_TOKEN (Settings ▸ Advanced ▸ Local API) and ls, find, get, run, send
+          and version ask the running app over 127.0.0.1 instead of the filesystem — for a sandbox
           that denies the folder, where --data-dir cannot help. POSTFRAU_API_URL overrides the
           address. Other commands need a real folder and will say so.
 

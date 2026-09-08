@@ -42,7 +42,7 @@ above fixes it.
 - Light, dark or follow-the-system, set per machine — the collections folder stays shared
 - Sync by pointing the data folder at iCloud Drive, Dropbox or a git checkout
 - Import OpenAPI 3.x; import/export Postman v2.1 and cURL, both directions
-- `postfrau` CLI that does all of the above from a shell
+- `postfrau` CLI that does all of the above from a shell, including `find` across every request
 - A loopback API, so an agent in a sandbox that cannot read your files can still list and send
 
 ## Importing an API

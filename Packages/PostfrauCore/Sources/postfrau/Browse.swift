@@ -41,6 +41,48 @@ enum Browse {
         return .ok
     }
 
+    static func find(
+        _ arguments: Arguments, _ runner: CommandRunner, _ out: Output
+    ) async throws -> ExitCode {
+        // Every positional is part of the query, so it need not be quoted:
+        // `postfrau find projection recovery` works as typed.
+        let terms = arguments.positional.joined(separator: " ")
+        guard !terms.isEmpty else {
+            out.error("find needs something to look for: `postfrau find projection recovery`")
+            return .usage
+        }
+        let limit = arguments.value("--limit").flatMap(Int.init) ?? 20
+        return render(try await runner.find(terms, limit: limit), out)
+    }
+
+    /// Printing, split from fetching, so the loopback API renders exactly what a local run does.
+    static func render(_ found: [FoundItem], _ out: Output) -> ExitCode {
+        if out.isJSON {
+            out.json(found)
+            return .ok
+        }
+        guard !found.isEmpty else {
+            out.print("nothing matched")
+            return .notFound
+        }
+        out.table(found.map { item in
+            [out.method(item.method), oneLine(item.path, 64),
+             out.dim(oneLine(item.description ?? item.url, 60))]
+        })
+        return .ok
+    }
+
+    /// First line, clipped.
+    ///
+    /// An OpenAPI `description` is routinely a dozen lines of prose, and a name imported from a
+    /// `summary` can be a whole sentence. Printed raw they turn one row of `find` into a page.
+    /// `--json` still carries the whole thing, which is what an agent should read.
+    private static func oneLine(_ text: String, _ limit: Int) -> String {
+        let first = text.split(separator: "\n", omittingEmptySubsequences: false)[0]
+            .trimmingCharacters(in: .whitespaces)
+        return first.count <= limit ? first : first.prefix(limit - 1) + "…"
+    }
+
     static func get(
         _ arguments: Arguments, _ runner: CommandRunner, _ out: Output
     ) async throws -> ExitCode {

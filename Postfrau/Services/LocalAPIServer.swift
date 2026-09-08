@@ -10,8 +10,8 @@ import PostfrauCore
 /// cannot read any of it, and no amount of `--data-dir` fixes that. So the app does the file
 /// access and hands back the answers. See `docs/decisions.md` D48.
 ///
-/// Everything here is deliberately small: four routes, no keep-alive, no chunked encoding. It is
-/// not a web server, it is a hatch in the side of the app.
+/// Everything here is deliberately small: a handful of routes, no keep-alive, no chunked
+/// encoding. It is not a web server, it is a hatch in the side of the app.
 actor LocalAPIServer {
     /// What the socket is allowed to do, and to whom.
     private enum Limits {
@@ -187,6 +187,12 @@ actor LocalAPIServer {
                     path: request.query["path"],
                     recursive: request.query["recursive"] != "0")
                 return HTTPResponse(status: 200, json: LocalAPI.ListResult(items: items))
+
+            case ("GET", "/v1/find"):
+                let found = try await runner.find(
+                    request.query["q"] ?? "",
+                    limit: request.query["limit"].flatMap(Int.init) ?? 20)
+                return HTTPResponse(status: 200, json: LocalAPI.FindResult(items: found))
 
             case ("GET", "/v1/detail"):
                 guard let path = request.query["path"] else {

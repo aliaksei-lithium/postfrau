@@ -27,8 +27,11 @@ what you need to work without further help.
 
 ## Ground rules
 
-- **Say who you are.** Pass `--as claude` (or set `POSTFRAU_AGENT=claude`) so the user can see
-  in the app which requests came from you. Do this on every command that sends.
+- **Say who you are, by your own name.** Pass `--as <your name>` — `--as cursor` from Cursor,
+  `--as claude` from Claude Code, `--as copilot`, and so on — or set `POSTFRAU_AGENT` once. The
+  user reads this in the app's history to tell which tool sent what, so putting someone else's
+  name there makes that useless. If you do not know what you are called, use the product name of
+  the tool you are running inside, not the model's. Do this on every command that sends.
 - **Secrets are hidden.** Values marked secret print as `•••`. `--reveal` prints them; only use
   it when the user has asked you to show one.
 - **Nothing is destructive by accident.** `rm` refuses to run without `--yes`.
@@ -36,6 +39,35 @@ what you need to work without further help.
   and writes no history.
 - **`--json` for parsing.** The human output is aligned text meant for a terminal; do not parse
   it. `run --all --json` emits NDJSON, one object per line.
+
+## Finding the request to run
+
+You will usually be given a job in words — "execute the projection recovery" — not a path. Start
+with `find`, which searches every request's name, path, description, method and URL. Every word
+has to match, in any order:
+
+```
+postfrau find projection recovery
+postfrau find projection recovery --json    # full descriptions, for reading
+```
+
+Then read the one you picked, and run it:
+
+```
+postfrau get 'Deposit API/Backfill/Trigger projection recalculation'
+postfrau run 'Deposit API/Backfill/Trigger projection recalculation' --as cursor
+```
+
+`find` returns nothing (exit 2) when no request matches every word — drop a word and try again
+rather than guessing a path. If a literal match fails entirely it falls back to fuzzy ranking, so
+a typo still lands somewhere sensible.
+
+`ls` is for structure, not for search: bare `ls` lists collections, `ls <path>` lists one level
+under it, and `ls --tree` walks everything. In a workspace of any size `find` is what you want.
+
+**Read before you fire.** `get` shows the resolved URL, the headers and the body that will
+actually be sent, and `run --dry-run` shows the whole request without sending it. Do that before
+anything that writes, and before anything pointed at production.
 
 ## Addressing things
 
@@ -207,13 +239,13 @@ export POSTFRAU_API_TOKEN=<the token from Settings ▸ Advanced ▸ Local API>
 export POSTFRAU_API_URL=http://127.0.0.1:7717     # only if the port was changed
 ```
 
-`ls`, `get`, `run`, `send` and `version` work exactly as they do locally, print the same output
-and return the same exit codes. Sends still land in the user's history, attributed. Everything
+`ls`, `find`, `get`, `run`, `send` and `version` work exactly as they do locally, print the same
+output and return the same exit codes. Sends still land in the user's history, attributed. Everything
 else — `add`, `set`, `mv`, `rm`, `import`, `export`, `history`, `env` — needs a real folder and
 will say so rather than half-work.
 
-So the way to do a job in a sandbox is: `postfrau ls` to see what exists, `postfrau ls <collection>`
-and `postfrau get <path>` to find the request you want, then `postfrau run <path>` — or
+So the way to do a job in a sandbox is exactly the way you would do it anywhere: `postfrau find
+<words>`, then `postfrau get <path>` to check it, then `postfrau run <path>` — or
 `postfrau send METHOD URL -H …` when nothing saved fits.
 
 The user turns this on in Settings ▸ Advanced ▸ Local API; it works only while Postfrau is

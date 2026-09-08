@@ -729,3 +729,29 @@ nobody can answer (D-note: the same reason `--keychain` is opt-in).
 - XcodeGen regenerates `Postfrau.entitlements` from `project.yml` on every `make gen`, exactly as
   it does `Info.plist`. `com.apple.security.network.server` had to be declared in `project.yml`;
   editing the entitlements file directly was silently undone, and the listener failed with EPERM.
+
+## D49 — `find`, because `ls` is not how anything discovers a request
+
+**The problem.** An agent is told "execute the projection recovery", not given a path. `ls` gave
+it collection names; `ls --tree` gave it the same collection names, because `list(path: nil, …)`
+ignored `recursive` outright. There was no way to get from a description in words to a path.
+
+**`find` matches every word, in any order, as a substring** of the request's name, path, method,
+URL or description. "recovery projection" finds `Backfill/Trigger deposit projections
+recalculation…`. Substrings rather than fuzzy ranking when anything matches literally: a tool
+choosing which request to fire at production should follow a rule the user can predict, not pick
+the nearest thing by edit distance. Fuzzy ranking is the fallback for when nothing matches at
+all, which is where a typo lands.
+
+**Output is clipped; `--json` is not.** An OpenAPI `description` is routinely a dozen lines, and
+a name imported from a `summary` can be a whole sentence — the first `find` against a real
+imported collection printed one row as most of a page. The table now shows the first line, cut to
+fit. `--json` still carries everything, which is what an agent should read.
+
+**`ls` keeps its job.** Structure, not search: bare `ls` lists collections, `ls <path>` lists one
+level, `ls --tree` now actually walks everything. In a workspace of any size `find` is the entry
+point, and the skill says so.
+
+**Agents name themselves.** `--as` was documented as `--as claude` throughout, which is wrong for
+every agent that is not Claude — the whole value of the field is telling one tool's sends from
+another's in the history. The skill now asks for the name of the tool the agent is running inside.

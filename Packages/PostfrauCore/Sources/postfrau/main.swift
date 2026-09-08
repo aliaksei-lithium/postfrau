@@ -20,7 +20,7 @@ enum CLI {
         "--about", "--agent", "--as", "--auth", "--body", "-d", "--capture", "--data-dir",
         "--env", "--file", "--from-curl", "--header", "-H", "--last", "--max-body", "--method",
         "-X", "--name", "--out", "--param", "--record", "--save-to", "--since", "--status",
-        "--to", "--url", "--var",
+        "--to", "--url", "--var", "--limit",
     ]
 
     static func run(_ arguments: [String]) async -> ExitCode {
@@ -136,6 +136,7 @@ enum CLI {
     ) async throws -> ExitCode {
             switch verb {
             case "ls": return try await Browse.list(parsed, runner, out)
+            case "find": return try await Browse.find(parsed, runner, out)
             case "get": return try await Browse.get(parsed, runner, out)
             case "add": return try await Edit.add(parsed, runner, out)
             case "set": return try await Edit.set(parsed, runner, out)
