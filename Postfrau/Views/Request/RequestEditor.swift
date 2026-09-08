@@ -67,9 +67,39 @@ struct RequestEditor: View {
         }
     }
 
-    @ViewBuilder
+    /// Sections that have been opened at least once, and are therefore built and kept.
+    @State private var visited: Set<EditorTab> = []
+
+    /// Every section that has been opened stays built; switching only changes which one shows.
+    ///
+    /// A `switch` here reads better, but it makes each section a separate branch of the view
+    /// tree, so SwiftUI tears the old one down and builds the new one on every click. These
+    /// sections are full of AppKit-backed controls — checkboxes, text fields, scroll views — and
+    /// rebuilding them cost ~200 ms of main-thread time per click, which is the lag you could
+    /// feel. Building each section once and then just hiding it costs ~50 ms. Sections are still
+    /// built lazily, so opening a request does not pay for the four tabs nobody looked at.
+    ///
+    /// A hidden section is `disabled`, not merely transparent: without that its text fields stay
+    /// in the window's key-view loop and ⇥ walks into a tab you cannot see. See D46.
     private var editorContent: some View {
-        switch tab.selectedEditorTab {
+        ZStack(alignment: .topLeading) {
+            ForEach(EditorTab.allCases) { editorTab in
+                if visited.contains(editorTab) {
+                    let isSelected = editorTab == tab.selectedEditorTab
+                    section(editorTab)
+                        .opacity(isSelected ? 1 : 0)
+                        .disabled(!isSelected)
+                        .accessibilityHidden(!isSelected)
+                }
+            }
+        }
+        .onAppear { visited.insert(tab.selectedEditorTab) }
+        .onChange(of: tab.selectedEditorTab) { _, new in visited.insert(new) }
+    }
+
+    @ViewBuilder
+    private func section(_ editorTab: EditorTab) -> some View {
+        switch editorTab {
         case .params: ParamsTab(tab: tab)
         case .headers: HeadersTab(tab: tab)
         case .auth: AuthTab(tab: tab)

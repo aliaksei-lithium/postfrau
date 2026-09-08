@@ -607,3 +607,52 @@ kept going wrong are now enforced rather than remembered:
 PNG, so `icon.json`'s gradient was doing nothing and macOS could not derive the tinted or clear
 appearances. The new one is white on transparent. `translucency` is also turned off: at the
 default 0.5 the system's glass treatment thinned the figure to a ghost at Dock size.
+
+## D46 — Editor sections are built once and kept, not rebuilt on every click
+
+**The report.** "I see a very huge lag when I click between Params, Headers." A first attempt in
+v1.2 cached the derived warnings and header list, which was a real fix for a real cost — but the
+lag survived it, and a later report added the decisive detail: *clicking* a section was much
+slower than ⌘1/⌘2.
+
+**What it actually was.** Every section was a separate branch of a `switch`, so SwiftUI tore the
+old subtree down and built the new one on every click. Those subtrees are full of AppKit-backed
+controls, and `HeadersTab` contained a `VSplitView` — an `NSSplitView` — built and destroyed each
+time. Measured on the main thread, one click cost **~150 ms**.
+
+Sections are now built lazily on first visit and then kept, with only the selected one shown; a
+hidden section is `disabled`, not merely transparent, so its text fields leave the window's
+key-view loop and ⇥ cannot walk into a section nobody can see. `VSplitView` became the app's own
+`ResizableSplit`. Together the main thread goes from **66% busy to 16%** — about **200 ms to
+50 ms per click**, a 4.2× cut — against a floor of 10.4% (~30 ms) measured with the whole section
+replaced by a single `Text`. Replacing the split alone got to 30%; the rest is the kept sections.
+
+Per-click figures are the busy share spread over the run, not a stopwatch: `sample` was asked for
+1 ms and actually managed about 1.3, so treat the ratios as solid and the milliseconds as round
+numbers.
+
+**Two hypotheses that were wrong, and how.** Both looked well-supported in a profile and both cost
+time, so they are worth recording:
+
+1. *"The toolbar is being rebuilt."* `NSToolbarView` was 26% of the busy tree. But instrumenting
+   the bodies showed `MainWindow` and `EnvironmentPicker` evaluating **zero** times across six
+   clicks, and `RequestEditor` exactly six. SwiftUI's invalidation was already minimal; the
+   toolbar was being *laid out* as part of the window's layout pass, not rebuilt. Sample counts
+   under a subtree say where time went, not what caused it.
+2. *"`ResizableSplit`'s `GeometryReader` cascades."* Plausible, and `GeometryReaderLayout` was 12%
+   of the tree — but rewriting it as a `Layout` moved the number from 66.3% to 65.6%, which is
+   noise. The rewrite was kept for an unrelated reason (see that file), not because it helped.
+
+**Measure the harness before the app.** Two full profiles were of the measurement, not the
+program. Driving the switch with ⌘1/⌘2 spent 20% of the main thread inside
+`NSMENU_IS_THROTTLING_REPEATED_MENU_ITEM_INVOCATIONS` — AppKit deliberately sleeping because a
+menu shortcut was being repeated. Driving it with the accessibility press action made
+`NSSegmentedCell` spin a nested event loop waiting for a mouse-up. Only real HID events measure
+what a person experiences. `Tools/measure-clicks.sh` posts those, and the controls that made the
+result trustworthy were: idle with no input (0.1% busy), moving the mouse without clicking (0.5%),
+and clicking inert space in the same table (1.7%) — against 66.3% for clicking a section.
+
+**The cost of keeping sections alive.** Hidden sections still take part in layout, so window
+resizing does slightly more work, and a request that has had every tab opened holds five subtrees
+instead of one. That is the right trade for an interaction the user performs constantly, and
+laziness keeps a request that only ever shows Params paying for Params alone.

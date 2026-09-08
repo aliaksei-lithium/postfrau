@@ -6,8 +6,14 @@ struct HeadersTab: View {
     @Environment(AppState.self) private var state
     @Bindable var tab: RequestTab
 
+    /// Not persisted — `VSplitView`, which this replaced, could not restore a divider either.
+    @State private var tableFraction = 0.62
+
     var body: some View {
-        VSplitView {
+        // `ResizableSplit`, not `VSplitView`: `VSplitView` is an `NSSplitView`, and building and
+        // tearing one down every time this tab appeared cost more than half of the ~200 ms that a
+        // Params ▸ Headers click spent on the main thread. See `docs/decisions.md` D46.
+        ResizableSplit(axis: .vertical, fraction: $tableFraction) {
             KeyValueEditor(
                 rows: $tab.draft.headers,
                 keyPrompt: "Header",
@@ -16,10 +22,8 @@ struct HeadersTab: View {
                 valueSuggestions: { HeaderCatalog.valueCompletions(forHeader: $0, prefix: $1) },
                 onChange: { state.draftChanged(tab) })
             .accessibilityLabel("Request headers")
-            .frame(minHeight: 120)
-
+        } second: {
             AutomaticHeadersView(tab: tab)
-                .frame(minHeight: 80)
         }
     }
 }
