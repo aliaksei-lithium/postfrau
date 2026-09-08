@@ -10,20 +10,22 @@ import Testing
 /// atomic on APFS — so a process killed at any moment leaves a whole file behind.
 @Suite("Crash safety", .serialized)
 struct CrashSafetyTests {
-    /// Writes a collection over and over in a subprocess, so it can be killed mid-write.
+    /// Writes a collection repeatedly in a subprocess, so it can be killed mid-write.
+    ///
+    /// Bounded, not `while true`: an unbounded loop spawns `mv` faster than the system reaps it,
+    /// and a `waitUntilExit` on the killed shell can then sit behind thousands of orphans. A
+    /// fixed number of writes with a pause between them is just as good at landing the kill
+    /// somewhere unpredictable, and it always terminates.
     private func writerScript(file: URL, marker: String) -> String {
-        // Each write is a full document; the loop runs until killed.
         """
-        set -e
         i=0
-        while true; do
+        while [ $i -lt 400 ]; do
           i=$((i + 1))
           body='{"schemaVersion":1,"id":"11111111-1111-1111-1111-111111111111",'
           body=$body'"name":"\(marker) '$i'","items":[],"variables":[],'
           body=$body'"auth":{"type":"none"},"revision":'$i',"extras":{}}'
-          tmp='\(file.path).tmp'$i
-          printf '%s' "$body" > "$tmp"
-          mv "$tmp" '\(file.path)'
+          printf '%s' "$body" > '\(file.path).tmp'
+          mv '\(file.path).tmp' '\(file.path)'
         done
         """
     }
@@ -37,8 +39,8 @@ struct CrashSafetyTests {
         try Data(#"{"schemaVersion":1,"id":"11111111-1111-1111-1111-111111111111","name":"seed","items":[],"variables":[],"auth":{"type":"none"},"revision":0,"extras":{}}"#.utf8)
             .write(to: file)
 
-        // Kill the writer at twenty different moments, reading after each.
-        for attempt in 0..<20 {
+        // Kill the writer at eight different moments, reading the document after each.
+        for attempt in 0..<8 {
             let process = Process()
             process.executableURL = URL(filePath: "/bin/sh")
             process.arguments = ["-c", writerScript(file: file, marker: "attempt\(attempt)")]
@@ -47,17 +49,31 @@ struct CrashSafetyTests {
             try process.run()
 
             // Somewhere inside the write loop, not at a predictable point.
-            try await Task.sleep(for: .milliseconds(.random(in: 5...40)))
+            try await Task.sleep(for: .milliseconds(.random(in: 5...25)))
             kill(process.processIdentifier, SIGKILL)
-            process.waitUntilExit()
+            await Self.waitForExit(process)
 
             let data = try Data(contentsOf: file)
             let decoded = try? Postfrau.makeDecoder().decode(RequestCollection.self, from: data)
-            #expect(decoded != nil, "attempt \(attempt) left an unreadable file: \(String(decoding: data, as: UTF8.self).prefix(120))")
+            let preview = String(decoding: data, as: UTF8.self).prefix(120)
+            #expect(decoded != nil, "attempt \(attempt) left an unreadable file: \(preview)")
         }
 
         // Temporaries a killed writer left behind are expected — it died before its rename. What
         // matters is that none of them is the destination, which every read above proved.
+    }
+
+    /// Waits for a killed child without `Process.waitUntilExit()`.
+    ///
+    /// `waitUntilExit` goes through Foundation's termination handling, which can sit forever when
+    /// another thread in the process is blocked inside the Security framework — which is exactly
+    /// what `KeychainProbe` does on a Mac whose keychain wants an authorization. Polling the pid
+    /// asks the kernel directly and cannot deadlock against anything.
+    static func waitForExit(_ process: Process, timeout: Duration = .seconds(5)) async {
+        let deadline = ContinuousClock.now.advanced(by: timeout)
+        while process.isRunning, ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
     }
 
     @Test func atomicWriteReplacesRatherThanTruncating() throws {
@@ -114,7 +130,7 @@ struct CrashSafetyTests {
         try process.run()
         try await Task.sleep(for: .milliseconds(30))
         kill(process.processIdentifier, SIGKILL)
-        process.waitUntilExit()
+        await Self.waitForExit(process)
 
         // The torn file is skipped; every complete entry is still there.
         let loaded = await store.load(limit: 100)

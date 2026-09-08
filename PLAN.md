@@ -360,12 +360,14 @@ update checkboxes here → `git commit -m "Phase N: …"`. Never start phase N+1
 - [x] URL bar (plain `TextField` for now), method picker, Send/Cancel, progress bar.
 - [x] `SendController`: takes current tab's draft, resolves variables (active env + chain + globals),
       calls executor, stores `HTTPResponse` on the tab, appends history entry.
-- [ ] *(R3)* Put the send pipeline in Core as `Commands/SendRequest` (input: request + scope + settings + record level +
+- [x] *(R3)* Put the send pipeline in Core as `Commands/SendRequest` (input: request + scope + settings + record level +
       source; output: `HTTPResponse` + the `HistoryEntry` it produced). `SendController` is a thin main-actor wrapper
-      that adds cancellation and tab state. The CLI (Phase 11) calls the same command. If Phase 3 is already past
-      this point, do the extraction at the start of Phase 11 instead — don't rework finished UI now.
-      **Deferred to Phase 11**: R3 landed after Phase 3's UI was built and working, which is exactly the
-      case this item describes. See `docs/decisions.md` D11.
+      that adds cancellation and tab state. The CLI (Phase 11) calls the same command.
+      **Deferred to Phase 11, then done in two parts** (`docs/decisions.md` D11, D42): Phase 11 put the send
+      pipeline in Core as `CommandRunner.send`, which is what the CLI calls. The *app* kept its own
+      `SendController` — a full migration would have reworked finished, tested UI for no user-visible gain —
+      but the part that must not diverge, turning an exchange into a redacted `HistoryEntry`, is now a single
+      `HistoryRecorder` in Core that both call.
 - [x] Response pane: status/time/size line, raw body in a `CodeTextView` (NSTextView wrapper, non-editable,
       monospaced, no highlighting yet), headers list.
 - [x] Environment picker in toolbar (switching only; management UI is Phase 7).

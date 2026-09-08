@@ -188,9 +188,8 @@ extension CommandRunner {
             ?? adHocScope(overrides: overrides)
         let resolver = VariableResolver(scope: variableScope)
         let auth = requestID.map { effectiveAuth(forRequestWithID: $0) } ?? request.auth
-        let secretValues = Set(
-            variableScope.allVariables().filter(\.isSecret).map(\.value).filter { !$0.isEmpty })
-            .union(Self.credentials(in: auth, resolver: resolver))
+        let secretValues = HistoryRecorder.secrets(
+            in: variableScope, auth: auth, resolver: resolver)
 
         let started = Date()
         var built: BuiltRequest
@@ -307,47 +306,18 @@ extension CommandRunner {
         startedAt: Date
     ) async {
         let settings = (try? await currentSettings()) ?? AppSettings()
-        let level = recordLevel ?? settings.historyRecording
-        guard level != .off else { return }
+        let policy = HistoryRecorder.Policy(
+            level: recordLevel ?? settings.historyRecording,
+            secrets: secrets,
+            bodyCap: settings.historyBodyCapBytes,
+            source: source)
 
-        var stored = HistoryRedactor.redact(request: request, secrets: secrets)
-        if !level.recordsBodies { stored.body = .none }
-
-        var entry = HistoryEntry(
-            sentAt: startedAt,
-            method: request.method,
-            resolvedURL: HistoryRedactor.redact(text: resolvedURL, secrets: secrets),
-            statusCode: result.status,
-            durationMs: result.durationMs,
-            responseBytes: result.bytes,
-            requestSnapshot: stored,
-            error: result.error,
-            source: source,
-            recordLevel: level)
-
-        if level.recordsHeaders {
-            entry.requestHeaders = built.map {
-                HistoryRedactor.redact(headers: $0.allHeaders, secrets: secrets)
-            }
-            entry.responseHeaders = response.map {
-                HistoryRedactor.redact(headers: $0.headers, secrets: secrets)
-            }
-        }
-        if level.recordsBodies {
-            if case .data(let data) = built?.payload, !data.isEmpty {
-                entry.requestBody = HistoryRedactor.redact(
-                    body: RecordedBody.capped(data, cap: settings.historyBodyCapBytes),
-                    secrets: secrets)
-            }
-            if let response, let data = try? response.body.prefix(settings.historyBodyCapBytes),
-               !data.isEmpty {
-                entry.responseBody = HistoryRedactor.redact(
-                    body: RecordedBody(
-                        data: data, truncated: response.byteCount > data.count,
-                        originalBytes: response.byteCount, mimeType: response.mimeType),
-                    secrets: secrets)
-            }
-        }
+        guard let entry = await HistoryRecorder.entry(
+            for: HistoryRecorder.Exchange(
+                request: request, resolvedURL: resolvedURL, built: built,
+                response: response, error: result.error, startedAt: startedAt),
+            policy: policy)
+        else { return }
         try? await history.append(entry)
     }
 
@@ -360,18 +330,6 @@ extension CommandRunner {
             case .folder(let folder): requests(in: folder.items)
             }
         }
-    }
-
-    /// Credential values, so redaction catches a token wherever it was typed.
-    static func credentials(in auth: Auth, resolver: VariableResolver) -> Set<String> {
-        let values: [String]
-        switch auth {
-        case .none, .inherit: values = []
-        case .bearer(let token): values = [token]
-        case .basic(_, let password): values = [password]
-        case .apiKey(_, let value, _): values = [value]
-        }
-        return Set(values.map { resolver.resolved($0) }.filter { !$0.isEmpty })
     }
 
     /// The sentence to show for an error. Used by the CLI as well as the app.

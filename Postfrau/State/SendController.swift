@@ -54,8 +54,8 @@ extension AppState {
         // pressed Send, not whatever they happen to be when the response lands.
         let recording = Recording(
             level: recordLevel(forCollection: tab.collectionID),
-            secrets: secretValues(for: tab)
-                .union(Self.credentials(in: auth, resolver: resolver)),
+            secrets: HistoryRecorder.secrets(
+                in: scope(for: tab), auth: auth, resolver: resolver),
             bodyCap: settings.historyBodyCapBytes)
 
         tab.sendTask = Task { [weak self, weak tab] in
@@ -111,32 +111,6 @@ extension AppState {
 
     // MARK: - History
 
-    /// The stored copy of the request: redacted always, and below `.full` stripped of its body.
-    ///
-    /// PLAN.md §6 Phase 8 — the default level keeps what makes an entry findable and re-sendable
-    /// without keeping the payload. The body is the part most likely to hold something personal.
-    static func snapshot(of request: RequestItem, recording: Recording) -> RequestItem {
-        var stored = HistoryRedactor.redact(request: request, secrets: recording.secrets)
-        if !recording.level.recordsBodies { stored.body = .none }
-        return stored
-    }
-
-    /// The credential values a request carries, resolved.
-    ///
-    /// A token typed straight into the Auth tab is every bit as sensitive as one stored as a
-    /// secret variable, and it comes back in the response of any endpoint that echoes headers.
-    /// Redacting the header alone would leave it sitting in the recorded body.
-    static func credentials(in auth: Auth, resolver: VariableResolver) -> Set<String> {
-        let values: [String]
-        switch auth {
-        case .none, .inherit: values = []
-        case .bearer(let token): values = [token]
-        case .basic(_, let password): values = [password]
-        case .apiKey(_, let value, _): values = [value]
-        }
-        return Set(values.map { resolver.resolved($0) }.filter { !$0.isEmpty })
-    }
-
     /// What history should keep about one send, decided before the request goes out.
     struct Recording: Sendable {
         var level: HistoryRecordLevel
@@ -144,6 +118,10 @@ extension AppState {
         var bodyCap: Int
     }
 
+    /// Hands the exchange to `HistoryRecorder`, which the CLI uses too.
+    ///
+    /// The app and `postfrau` record the same way on purpose: two copies of the redaction rules
+    /// would be two places to fix a leak, and only one of them would get fixed.
     private func record(
         request: RequestItem,
         resolvedURL: String,
@@ -154,73 +132,23 @@ extension AppState {
         collectionName: String?,
         recording: Recording
     ) async {
-        guard recording.level != .off else { return }
+        let entry = await HistoryRecorder.entry(
+            for: HistoryRecorder.Exchange(
+                request: request,
+                resolvedURL: resolvedURL,
+                built: built,
+                response: response,
+                error: error,
+                startedAt: startedAt,
+                collectionName: collectionName),
+            policy: HistoryRecorder.Policy(
+                level: recording.level,
+                secrets: recording.secrets,
+                bodyCap: recording.bodyCap,
+                source: .app))
 
-        var entry = HistoryEntry(
-            sentAt: startedAt,
-            method: request.method,
-            resolvedURL: HistoryRedactor.redact(text: resolvedURL, secrets: recording.secrets),
-            statusCode: response?.statusCode,
-            durationMs: response?.timing.totalMilliseconds
-                ?? Date().timeIntervalSince(startedAt) * 1000,
-            responseBytes: response?.byteCount ?? 0,
-            requestSnapshot: Self.snapshot(of: request, recording: recording),
-            error: error,
-            collectionName: collectionName,
-            source: .app,
-            recordLevel: recording.level)
-
-        if recording.level.recordsHeaders {
-            entry.requestHeaders = built.map {
-                HistoryRedactor.redact(headers: $0.allHeaders, secrets: recording.secrets)
-            }
-            entry.responseHeaders = response.map {
-                HistoryRedactor.redact(headers: $0.headers, secrets: recording.secrets)
-            }
-        }
-        if recording.level.recordsBodies {
-            entry.requestBody = await Self.recordedRequestBody(built, recording: recording)
-            entry.responseBody = await Self.recordedResponseBody(response, recording: recording)
-        }
-
+        guard let entry else { return }
         await appendHistory(entry)
-    }
-
-    /// Reads the bodies off the main thread — a `.full` recording of a 20 MB response must not
-    /// stall the window that is busy rendering it.
-    @concurrent
-    private static func recordedRequestBody(
-        _ built: BuiltRequest?, recording: Recording
-    ) async -> RecordedBody? {
-        guard let built else { return nil }
-        let data: Data?
-        switch built.payload {
-        case .data(let bytes): data = bytes
-        case .file(let url): data = try? Data(contentsOf: url, options: [.mappedIfSafe])
-        case .none: data = nil
-        }
-        guard let data, !data.isEmpty else { return nil }
-        let body = RecordedBody.capped(
-            data, cap: recording.bodyCap,
-            mimeType: built.allHeaders.value(for: "Content-Type"))
-        return HistoryRedactor.redact(body: body, secrets: recording.secrets)
-    }
-
-    @concurrent
-    private static func recordedResponseBody(
-        _ response: HTTPResponse?, recording: Recording
-    ) async -> RecordedBody? {
-        guard let response else { return nil }
-        // Only the capped prefix is read, so a huge response costs the cap and not its size.
-        guard let data = try? response.body.prefix(recording.bodyCap), !data.isEmpty else {
-            return nil
-        }
-        let body = RecordedBody(
-            data: data,
-            truncated: response.byteCount > data.count,
-            originalBytes: response.byteCount,
-            mimeType: response.mimeType)
-        return HistoryRedactor.redact(body: body, secrets: recording.secrets)
     }
 }
 

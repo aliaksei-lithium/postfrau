@@ -509,3 +509,38 @@ until a relaunch. Found by doing exactly what the feature is for — running thr
 commands from a terminal beside the running app. Coming back from that terminal is precisely the
 moment the sidebar is most likely to be stale, which is why activation is the trigger; a directory
 listing is far cheaper than decoding every entry, so the common case costs nothing.
+
+## D42 — The send pipeline is shared where it matters, not wholesale
+
+**What.** `HistoryRecorder` in Core turns a finished exchange into a redacted `HistoryEntry`, and
+both `SendController` (the app) and `CommandRunner` (the CLI) call it. The app still owns its own
+send path — cancellation, tab state, the response landing on the right tab.
+
+**Why.** R3 asked for `Commands/SendRequest` with `SendController` reduced to a thin wrapper.
+Phase 11 built the Core command and the CLI uses it, but migrating the app's send path wholesale
+would have reworked UI that was finished, tested and working, for nothing a user could see — and
+the plan itself says not to do that.
+
+What genuinely could not stay duplicated is the recording: two copies of the redaction rules, the
+level handling and the body caps are two places to fix a leak, and only one of them gets fixed.
+Before this, the app and the CLI each had their own — and they had already drifted, the app
+collecting credentials one way and the CLI another. That is now one function with one set of
+tests behind it.
+
+**What is left.** The app builds and sends its own requests. If a third caller ever appears, that
+is the moment to finish the extraction rather than guess at it now.
+
+## D43 — Tests wait on a killed child by polling, not `waitUntilExit()`
+
+**What.** `CrashSafetyTests` polls `Process.isRunning` with a deadline instead of calling
+`waitUntilExit()`.
+
+**Why.** `waitUntilExit()` goes through Foundation's termination handling, which sat forever
+whenever another thread in the test process was blocked inside the Security framework — which is
+exactly what `KeychainProbe` does on a Mac whose keychain wants an authorization nobody can give.
+The suite hung for fourteen minutes at a line that had passed in a second and a half an hour
+earlier. Polling asks the kernel directly and cannot deadlock against anything.
+
+The writer script is bounded too, for a related reason: an unbounded `while true` loop spawns `mv`
+faster than the system reaps it, and the wait then queues behind thousands of orphans. Four
+hundred writes land the kill just as unpredictably and always terminate.

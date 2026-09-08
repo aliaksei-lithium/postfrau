@@ -82,15 +82,6 @@ extension AppState {
         id.flatMap { workspace.collection(withID: $0)?.historyRecording } ?? settings.historyRecording
     }
 
-    /// Every resolved secret value in scope, so redaction can catch a token wherever it landed —
-    /// in a header the user typed by hand, in a query string, in a body.
-    func secretValues(for tab: RequestTab) -> Set<String> {
-        Set(scope(for: tab).allVariables()
-            .filter(\.isSecret)
-            .map(\.value)
-            .filter { !$0.isEmpty })
-    }
-
     /// Adds an entry to the log and to the sidebar. `.off` entries are dropped by the store.
     func appendHistory(_ entry: HistoryEntry) async {
         guard entry.recordLevel != .off else { return }
