@@ -827,3 +827,39 @@ text view's own.
 `{{tokens}}` are still coloured and still explain themselves on hover, the field shrinks back when
 the URL does, and the method picker and Send button stay beside the first line instead of drifting
 to the middle of a growing box.
+
+## D52 — A `count: 2` tap gesture beside a single tap costs the double-click interval
+
+**What it was.** Clicking a sidebar row took **383 ms** to paint; clicking a tab, **464 ms**. The
+main thread was idle for almost all of it — 94.7% idle across a window containing two clicks.
+
+Both views paired `onTapGesture(count: 2)` with a single `onTapGesture` on the same view. SwiftUI
+cannot know whether the first click starts a double, so it holds the single action until
+`NSEvent.doubleClickInterval` has passed — half a second on this Mac, ~400 ms observed. The wait is
+a timer, not work.
+
+The fix is one tap gesture that asks AppKit what kind of click it was:
+
+    .onTapGesture {
+        state.sidebarSelection = request.id
+        if NSApp.currentEvent?.clickCount == 2 { state.openRequest(id: request.id) }
+    }
+
+**Measured, click to first repaint of the window:** sidebar **383 → 27 ms**, tabs **464 → 134 ms**.
+
+**Why three rounds of profiling missed it.** Every measurement to that point sampled *main-thread
+busy time*. A 400 ms sleep is 0% busy, so the metric could not see the defect however carefully it
+was read — and the CPU numbers it did produce were correct, which made them convincing.
+`Tools/measure-clicks.sh` reports busy share and says so; **latency is the metric for "does this
+feel instant", and it has to be measured by watching pixels change.** The lesson generalises past
+this bug: pick the metric from the complaint, not from the tool that is easiest to run.
+
+**The constraint this leaves.** Never attach a `count: 2` tap gesture alongside a single tap on
+anything that has to respond immediately. A `count: 2` on a *sibling* row is harmless — sidebar
+rows reach 27 ms while `CollectionRow` and `FolderRow` still carry one — so this is about pairing
+on the same view, not about the modifier existing.
+
+**Still open on tabs.** 134 ms, of which ~50 ms is real work and ~80 ms is still an unexplained
+wait. Ruled out by measurement: the tab strip's background double-tap (neutral), and the
+`scrollTo` on selection change (neutral). The sidebar, which does the same amount of work, paints
+in 27 ms — so the wait is specific to the tab path.

@@ -98,8 +98,17 @@ struct TabItem: View {
             Rectangle().fill(Color(nsColor: .separatorColor)).frame(width: 1)
         }
         .contentShape(.rect)
-        .onTapGesture { state.selectedTabID = tab.id; state.markUIStateDirty() }
-        .onTapGesture(count: 2) { beginRename() }
+        // One tap gesture; the double click comes from the AppKit event. Pairing a `count: 2`
+        // gesture with a single one makes SwiftUI hold the single action for the full
+        // double-click interval — ~400 ms — before selecting. See `docs/decisions.md` D52.
+        .onTapGesture {
+            if NSApp.currentEvent?.clickCount == 2 {
+                beginRename()
+            } else {
+                state.selectedTabID = tab.id
+                state.markUIStateDirty()
+            }
+        }
         .onHover { isHovering = $0 }
         .help(tab.draft.url.isEmpty ? tab.title : tab.draft.url)
         .contextMenu {

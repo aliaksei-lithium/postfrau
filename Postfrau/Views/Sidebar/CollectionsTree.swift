@@ -276,17 +276,19 @@ struct RequestRow: View {
         .contentShape(.rect)
         // Two taps, higher count first, and the single tap sets the selection itself.
         //
-        // A `List` row cannot keep its own selection behaviour alongside a tap gesture: both
-        // `onTapGesture(count: 2)` and `simultaneousGesture` swallow the single click, and the
-        // blue highlight stops following what you click. Since the selection is ours anyway,
-        // the row just sets it. Arrow keys still go through the list's binding.
-        .onTapGesture(count: 2) {
-            // Opening also moves the highlight: a double tap does not fire the single-tap
-            // gesture below it, so without this the selection stays on the previous row.
+        // A `List` row cannot keep its own selection behaviour alongside a tap gesture:
+        // `onTapGesture(count: 2)` and `simultaneousGesture` both swallow the single click and
+        // the highlight stops following what you click. Since the selection is ours anyway, the
+        // row sets it. Arrow keys still go through the list's binding.
+        //
+        // One tap gesture, and the double click comes from the AppKit event. A `count: 2` tap
+        // gesture beside a single one makes SwiftUI hold the single action for the whole
+        // `NSEvent.doubleClickInterval` — ~400 ms here — while it waits to see whether a second
+        // click arrives. That wait, not any work, was the lag. See `docs/decisions.md` D52.
+        .onTapGesture {
             state.sidebarSelection = request.id
-            state.openRequest(id: request.id)
+            if NSApp.currentEvent?.clickCount == 2 { state.openRequest(id: request.id) }
         }
-        .onTapGesture { state.sidebarSelection = request.id }
         .contextMenu {
             Button("Open") { state.openRequest(id: request.id) }
             Button("Rename…") { beginRename() }
