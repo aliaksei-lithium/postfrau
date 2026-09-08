@@ -56,7 +56,7 @@ sleep 0.4
 "$WORK/clicker" "$X1" "$Y1" "$X2" "$Y2" "$CLICKS"
 wait $SAMPLER
 
-python3 - "$WORK/sample.txt" "$CLICKS" <<'PY'
+python3 - "$WORK/sample.txt" "$CLICKS" "$SECONDS_TO_SAMPLE" <<'PY'
 import re, sys
 lines = open(sys.argv[1], errors="replace").read().split("\n")
 graph = next(i for i, l in enumerate(lines) if l.startswith("Call graph"))
@@ -81,6 +81,9 @@ total = sum(leaves.values())
 idle = sum(n for name, n in leaves.items() if any(m in name for m in idle_markers))
 busy = total - idle
 clicks = int(sys.argv[2])
-print(f"main thread: {total} samples, {busy} busy ({100 * busy / total:.1f}%)")
-print(f"≈ {busy / clicks:.0f} ms of main-thread work per click")
+fraction = busy / total
+print(f"main thread: {total} samples, {busy} busy ({100 * fraction:.1f}%)")
+# Spread the busy share over the wall clock rather than counting a sample as a millisecond:
+# `sample` is asked for 1 ms and does not achieve it, so sample counts are not milliseconds.
+print(f"≈ {fraction * float(sys.argv[3]) * 1000 / clicks:.0f} ms of main-thread work per click")
 PY
