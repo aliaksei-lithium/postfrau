@@ -105,11 +105,9 @@ struct CollectionRow: View {
             .accessibilityElement(children: isRenaming ? .contain : .ignore)
             .accessibilityLabel("Collection \(collection.name)\(syncDescription)")
             .contentShape(.rect)
-            // `simultaneousGesture`, not `onTapGesture`: a plain tap gesture on a `List` row
-            // consumes the click before the list's own selection gesture sees it, and the
-            // selection highlight stops following what you click.
-            .simultaneousGesture(
-                TapGesture(count: 2).onEnded { state.openCollectionEditor(collection.id) })
+            // Collections and folders carry no `.tag`, so they are not selectable and a plain
+            // tap gesture costs nothing here. Requests are the ones that had to change.
+            .onTapGesture(count: 2) { state.openCollectionEditor(collection.id) }
             .contextMenu { menu }
             .dropDestination(for: DraggedItem.self) { items, _ in
                 return state.handleDrop(items, collectionID: collection.id, parentID: nil)
@@ -211,8 +209,7 @@ struct FolderRow: View {
             .accessibilityElement(children: isRenaming ? .contain : .ignore)
             .accessibilityLabel("Folder \(folder.name)")
             .contentShape(.rect)
-            .simultaneousGesture(
-                TapGesture(count: 2).onEnded { state.openFolderEditor(folder.id, in: collectionID) })
+            .onTapGesture(count: 2) { state.openFolderEditor(folder.id, in: collectionID) }
             .contextMenu {
                 Button("New Request") { state.newRequest(in: collectionID, parentID: folder.id) }
                 Button("New Folder") { state.newFolder(in: collectionID, parentID: folder.id) }
@@ -277,7 +274,19 @@ struct RequestRow: View {
         .accessibilityLabel("\(request.method.rawValue) \(request.name)")
         .accessibilityAddTraits(.isButton)
         .contentShape(.rect)
-        .simultaneousGesture(TapGesture(count: 2).onEnded { state.openRequest(id: request.id) })
+        // Two taps, higher count first, and the single tap sets the selection itself.
+        //
+        // A `List` row cannot keep its own selection behaviour alongside a tap gesture: both
+        // `onTapGesture(count: 2)` and `simultaneousGesture` swallow the single click, and the
+        // blue highlight stops following what you click. Since the selection is ours anyway,
+        // the row just sets it. Arrow keys still go through the list's binding.
+        .onTapGesture(count: 2) {
+            // Opening also moves the highlight: a double tap does not fire the single-tap
+            // gesture below it, so without this the selection stays on the previous row.
+            state.sidebarSelection = request.id
+            state.openRequest(id: request.id)
+        }
+        .onTapGesture { state.sidebarSelection = request.id }
         .contextMenu {
             Button("Open") { state.openRequest(id: request.id) }
             Button("Rename…") { beginRename() }

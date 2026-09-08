@@ -20,9 +20,15 @@ struct TabBar: View {
                     }
                 }
                 .scrollIndicators(.never)
+                // Not animated, and not centred.
+                //
+                // Animating this ran the strip's layout once per frame for 0.15 s on *every* tab
+                // switch — about 55 ms of main-thread work, the single largest cost of switching
+                // tabs. `anchor: nil` also means a tab already on screen is left where it is,
+                // rather than the strip sliding out from under the pointer when you click one.
                 .onChange(of: state.selectedTabID) { _, id in
                     guard let id else { return }
-                    withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(id, anchor: .center) }
+                    proxy.scrollTo(id)
                 }
             }
 

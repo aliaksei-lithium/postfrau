@@ -785,9 +785,19 @@ hidden *editors* are not, because each one still takes part in every layout pass
 where the alternative is rebuilding an AppKit-backed subtree, not where it multiplies the number
 of subtrees being laid out.
 
-**What is left.** ~99 ms a switch, of which roughly 60 is building the request editor for the
-newly selected tab and the rest is the shell. It is spread across SwiftUI layout rather than
-sitting in any one place: the URL bar accounts for 5 ms, the response pane for 8, and no single
-frame of ours exceeds a few per cent. Reducing it further means making the params table cheaper to
-build — fewer AppKit-backed text fields per row, or genuinely lazy rows — which is a bigger change
-than this one and wants its own measurement.
+**Then the actual cause, found by bisecting the shell.** The tab strip ran
+`withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(id, anchor: .center) }` on *every*
+selection change. That is a layout pass per frame for 150 ms, and it was **~55 ms of main-thread
+work per switch — the single largest cost**, larger than building the editor. It was also wrong
+behaviour: clicking a tab you can already see should not slide the strip out from under the
+pointer. Unanimated, and without the centring anchor, a switch went from **99 ms to 47 ms**.
+
+Bisection order matters here. Stubbing components one at a time gave: sections 32 ms, segmented
+picker 15 ms, URL bar 5, response pane 8 — and a shell floor of ~47 that no amount of editor work
+would have touched. Chasing the editor first, which is where the content is, would have been the
+obvious move and the wrong one.
+
+**What is left.** ~47 ms a switch and ~28 ms for a sidebar selection. The sidebar's remainder has
+a known cause: `List(selection:)` binds to `sidebarSelection`, so `SidebarView.body` re-evaluates
+on every selection and rebuilds all forty rows. Fixing that means getting the selection binding
+out of the body that owns the rows.
