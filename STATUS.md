@@ -1,8 +1,9 @@
 # Postfrau — status
 
-**Current phase:** 10 (Import / Export) — next
-**Last completed:** Phase 9 — Sync via the data folder
-**Build:** green — `make test` passes: 364 Core tests (~6 s) plus 36 app unit tests.
+**Current phase:** 11 (CLI & agent interface) — next
+**Last completed:** Phase 10 — Import / Export
+**Build:** green — `make test` passes: 426 Core tests (~6 s) plus 47 app unit tests.
+`make live-test` runs the ones that talk to the real network.
 
 > **UI tests need a free, awake desktop.** `make ui-test` runs the XCUITest suite separately,
 > because it drives the real UI and needs a display where Postfrau's window can come to the front.
@@ -47,7 +48,16 @@ Compose a request, organise it, send it, read the response — the whole loop.
   text and by source. Opening an entry gives a tab whose response pane shows the recording
   read-only under a "recorded" banner — re-attached from the log after a relaunch, and replaced the
   moment you send from that tab. "Save to Collection", delete one, clear all.
-- **Sync** (new): point the data folder at anything a sync client watches — iCloud Drive, Google
+- **Import and export** (new): Postman v2.1 collections in both directions, Postman environments
+  in both directions, and cURL in both directions. One File ▸ Import… that works out what a file
+  is by reading it — a collection, an environment or a saved curl command — plus dropping a file
+  on the sidebar. Anything the importer cannot model is kept verbatim, so an export puts back the
+  scripts, saved examples and `protocolProfileBehavior` it never understood, and a round trip
+  gives back an identical model. Pasting a curl command into the URL bar fills in the whole
+  request, moving a `Bearer` or `Basic` header into the Auth tab where it can be edited. ⌘⇧C
+  copies the request back out as curl, with variables resolved or left as `{{names}}`. A secret's
+  value is never written into an exported file.
+- **Sync**: point the data folder at anything a sync client watches — iCloud Drive, Google
   Drive, Dropbox, a git checkout — and two Macs share collections and environments with no server
   in between. An `NSFilePresenter` and a `DispatchSource` together catch both coordinated and
   plain writes; a burst is coalesced for 500 ms and answered with one diff, and Postfrau
@@ -70,12 +80,13 @@ first megabyte and stays interactive. A 5 000-request collection loads in 1.5 s 
 window, and seven successive filter passes over it take under 350 ms in total. 1 000 history
 entries across five day folders load in 71 ms. A second process and the in-process store each
 append 150 entries at once with nothing lost and no torn read. Two app instances sharing one data
-folder both pick up an external change within about three seconds.
+folder both pick up an external change within about three seconds. An imported Postman collection
+sends to httpbin and comes back 200, body and headers intact.
 
 ## Next
 
-Phase 10 — import and export: Postman v2.1 collections and environments, and cURL in both
-directions.
+Phase 11 — the `postfrau` CLI and the Claude Code skill, including the `Commands/SendRequest`
+extraction deferred from Phase 3 (`docs/decisions.md` D11).
 
 ## Known issues / limitations
 
@@ -97,6 +108,13 @@ directions.
   download, ignoring Apple's own conflict versions) are covered by tests, not by a live account.
 - The "Agents only" filter has been exercised by test but not photographed: it is a segmented
   picker in a sidebar row that AppleScript could not reach, and screen control was declined.
+- **File ▸ Import… and drag-onto-sidebar have not been driven by hand** (`docs/decisions.md` D34).
+  A sandboxed app's open panel runs in another process that will not take synthesized keystrokes,
+  and a drag cannot be synthesized here. Everything downstream of the URL the panel returns is
+  tested, and the paste-a-curl path was driven end to end in the running app.
+- The Postman importer is measured against **hand-written fixtures**, not a real export from
+  Postman. They cover every body mode, nesting, disabled flags, an unsupported auth scheme and
+  unknown fields, but a genuine export would be worth a round trip.
 - `URLSession` occasionally leaves a `CFNetworkDownload_*.tmp` in the container's tmp when a
   download is cancelled. Postfrau's own spill files are cleaned up; these are the framework's.
 - App icon is a placeholder mark (Phase 12). Hardened runtime is off in the generated project and
@@ -104,7 +122,7 @@ directions.
 
 ## Decisions taken
 
-`docs/decisions.md` D1–D33. Most consequential: D9 `download(for:)` instead of `bytes(for:)` ·
+`docs/decisions.md` D1–D35. Most consequential: D9 `download(for:)` instead of `bytes(for:)` ·
 D11 `Commands` extraction deferred to Phase 11 · D20 response bodies wrap by default (TextKit was
 measuring one multi-megabyte line and blocking the main thread for 30 s) · D22 UI tests split out
 of the commit gate · D24 the sidebar filter is computed once per change and capped ·
@@ -112,4 +130,5 @@ D25 menu commands hold the state instead of reading it through focus · D28 app 
 a `URLProtocol` because the sandbox forbids the app from binding a socket · D30 a restored history
 tab is re-attached from the log rather than duplicated into `ui-state.json` · D31 `dataFolderPath`
 is a real fallback, because a bookmark cannot be shared with a second process · D32 a vanished
-folder is one event and is recovered by polling.
+folder is one event and is recovered by polling · D35 live tests need `TEST_RUNNER_`-prefixed
+environment variables, without which the whole suite skipped silently and ran green.

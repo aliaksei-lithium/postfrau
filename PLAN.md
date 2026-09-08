@@ -541,26 +541,37 @@ Goal: pointing the data folder at `iCloud Drive/Postfrau` (or Google Drive, Drop
 - Not verified: the conflict banner itself has only been exercised by test. Producing one by hand needs a
   collection held in an unsaved state while another process writes it, which the UI autosaves away in 300 ms.
 
-### Phase 10 — Import / Export  ☐
-- [ ] `PostmanV21Importer`: `info`, nested `item[]`, `request.url` as string OR object (`raw`, `host[]`,
+### Phase 10 — Import / Export  ☑
+- [x] `PostmanV21Importer`: `info`, nested `item[]`, `request.url` as string OR object (`raw`, `host[]`,
       `path[]`, `query[]`, `variable[]`), `header[]`, `body` modes (`raw` + `options.raw.language`,
       `formdata` incl. `type: file` (record src path as display name only), `urlencoded`, `file`, none),
       `auth` (`noauth`, `basic`, `bearer`, `apikey`; anything else → `.none` + warning), `variable[]`,
       `disabled` flags, descriptions. Unknown fields (`event[]` scripts, `protocolProfileBehavior`) are
       preserved as an opaque `extras: [String: JSONValue]` on the model so export round-trips them.
       Importer returns `(Collection, warnings: [String])`; UI shows warnings in a sheet.
-- [ ] `PostmanV21Exporter`: inverse; export one collection to a file. Round-trip tests with fixtures
+- [x] `PostmanV21Exporter`: inverse; export one collection to a file. Round-trip tests with fixtures
       (build 3–4 realistic fixtures by hand covering all body modes and nesting).
-- [ ] Postman Environment import/export (`{name, values:[{key,value,enabled,type:"secret"|"default"}]}`).
-- [ ] `CurlParser`: `-X/--request`, `-H/--header`, `-d/--data/--data-raw/--data-binary/--data-urlencoded`,
+- [x] Postman Environment import/export (`{name, values:[{key,value,enabled,type:"secret"|"default"}]}`).
+- [x] `CurlParser`: `-X/--request`, `-H/--header`, `-d/--data/--data-raw/--data-binary/--data-urlencoded`,
       `-F/--form`, `-u/--user`, `-b/--cookie`, `-L`, `-k/--insecure`, `--url`, `-A`, quoted args (single/double,
       backslash-newline continuation, `$'…'`), unknown flags ignored with a warning. Tests with 15+ real-world curls.
-- [ ] `CurlFormatter`: request → multi-line `curl` with resolved or raw variables (user chooses).
-- [ ] UI: File ▸ Import… (auto-detects collection vs environment vs cURL text file), drag `.json` onto the
+- [x] `CurlFormatter`: request → multi-line `curl` with resolved or raw variables (user chooses).
+- [x] UI: File ▸ Import… (auto-detects collection vs environment vs cURL text file), drag `.json` onto the
       sidebar, paste cURL into URL bar, File ▸ Export Collection…, Export Environment…, ⌘⇧C copy as cURL.
 - Acceptance: import a real exported Postman collection (ask the user for one or use fixtures), send a
   request from it successfully; export → re-import yields an identical model (test asserts equality
   modulo ids/timestamps).
+- Verified: `make live-test` imports the Postman export and sends two of its requests to httpbin — the GET
+  proves the imported header went out and the collection's own `{{baseUrl}}` resolved, the POST proves the
+  imported JSON body arrived. In the running app, pasting a Chrome-style `curl` into the URL bar filled in
+  method, headers, auth and body, and sending it returned 200 with httpbin echoing back the exact
+  `Authorization: Bearer …` and `{"from":"Postfrau"}` Postfrau reconstructed.
+- Not verified by hand: **File ▸ Import…** and **drag onto the sidebar**. Synthesized keystrokes do not reach
+  the out-of-process `NSOpenPanel` a sandboxed app gets, and a drag cannot be synthesized here either; both
+  paths call the same `importFile(at:)` that the tests drive (D34).
+- Fixtures rather than a real export: the collection under test was written by hand to cover every body mode,
+  nesting, disabled flags, an unsupported auth scheme and unknown fields. A genuine Postman export would be
+  worth re-running the round-trip against.
 
 ### Phase 11 — CLI & agent interface  ☐
 Goal: an agent with only Bash and `skills/postfrau/SKILL.md` can inspect and edit collections, run requests, and read history, without the app running, and everything it does shows up in the app with attribution.

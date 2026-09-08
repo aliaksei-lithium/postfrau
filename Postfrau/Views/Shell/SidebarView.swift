@@ -34,6 +34,12 @@ struct SidebarView: View {
                 }
             }
             .listStyle(.sidebar)
+            // Dropping a file on the sidebar is the other obvious way to import one.
+            .dropDestination(for: URL.self) { urls, _ in
+                guard let url = urls.first else { return false }
+                Task { await state.importFile(at: url) }
+                return true
+            }
             .searchable(
                 text: $state.sidebarFilter, placement: .sidebar,
                 prompt: section == .collections ? "Filter requests" : "Filter history")

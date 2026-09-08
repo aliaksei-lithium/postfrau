@@ -13,7 +13,7 @@ DEST       := platform=macOS
 # xcodebuild is extremely noisy; keep only diagnostics and the verdict.
 FILTER     := (grep -E "^(/|\.).*:[0-9]+:[0-9]+: (error|warning): |^(error|warning): |^\*\* [A-Z]+ (SUCCEEDED|FAILED)|^Testing failed" || true)
 
-.PHONY: all gen build test core-test app-test ui-test run clean release screenshot
+.PHONY: all gen build test core-test app-test ui-test live-test run clean release screenshot
 
 all: build
 
@@ -45,6 +45,15 @@ ui-test: $(PROJECT)
 	@set -o pipefail; xcodebuild -project $(PROJECT) -scheme $(SCHEME) \
 		-configuration Debug -destination '$(DEST)' test \
 		-only-testing:PostfrauUITests 2>&1 | $(FILTER)
+
+# Tests that talk to the real network (example.com, httpbin.org). Kept out of `make test` so the
+# commit gate never depends on someone else's uptime. `TEST_RUNNER_` is how xcodebuild passes an
+# environment variable through to the test host; the shell's own environment does not reach it.
+live-test: $(PROJECT)
+	@cd $(CORE) && POSTFRAU_LIVE_TESTS=1 swift test --filter Live 2>&1 | grep -vE "^◇" || true
+	@set -o pipefail; TEST_RUNNER_POSTFRAU_LIVE_TESTS=1 xcodebuild -project $(PROJECT) \
+		-scheme $(SCHEME) -configuration Debug -destination '$(DEST)' test \
+		-only-testing:PostfrauTests 2>&1 | $(FILTER)
 
 test: core-test app-test
 

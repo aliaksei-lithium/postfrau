@@ -26,6 +26,9 @@ struct MainWindow: View {
             }
             .navigationSplitViewColumnWidth(min: 520, ideal: 900)
         }
+        .sheet(item: $state.importReport) { report in
+            ImportReportSheet(report: report) { state.importReport = nil }
+        }
         .navigationTitle(state.selectedTab?.title ?? "Postfrau")
         .toolbar {
             ToolbarSpacer(.flexible)

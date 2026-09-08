@@ -42,6 +42,28 @@ struct AppCommands: Commands {
                 .keyboardShortcut("n", modifiers: [.command, .shift])
         }
 
+        CommandGroup(after: .newItem) {
+            Divider()
+            CommandButton(title: "Import…", state: state) { $0.runImportPanel() }
+                .keyboardShortcut("i", modifiers: [.command, .shift])
+
+            CommandButton(
+                title: "Export Collection…", state: state,
+                isEnabled: { $0.exportableCollectionID != nil },
+                action: { state in
+                    if let id = state.exportableCollectionID { state.exportCollection(id) }
+                })
+
+            CommandButton(
+                title: "Export Environment…", state: state,
+                isEnabled: { $0.workspace.activeEnvironment != nil },
+                action: { state in
+                    if let id = state.workspace.activeEnvironmentID {
+                        state.exportEnvironment(id)
+                    }
+                })
+        }
+
         CommandGroup(after: .saveItem) {
             CommandButton(
                 title: "Save Request", state: state,
@@ -73,6 +95,25 @@ struct AppCommands: Commands {
                     state.cancelSend(tab)
                 })
             .keyboardShortcut(".", modifiers: .command)
+
+            Divider()
+
+            CommandButton(
+                title: "Copy as cURL", state: state,
+                isEnabled: { $0.selectedTab?.kind == .request },
+                action: { state in
+                    guard let tab = state.selectedTab else { return }
+                    state.copyAsCurl(tab)
+                })
+            .keyboardShortcut("c", modifiers: [.command, .shift])
+
+            CommandButton(
+                title: "Copy as cURL Keeping Variables", state: state,
+                isEnabled: { $0.selectedTab?.kind == .request },
+                action: { state in
+                    guard let tab = state.selectedTab else { return }
+                    state.copyAsCurl(tab, handling: .raw)
+                })
 
             Divider()
 

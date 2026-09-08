@@ -395,3 +395,30 @@ per-document copies to the same place, and a single document is far easier to re
 folder of readable JSON than from inside an archive.
 
 **What changed.** `PLAN.md` Phase 9 now says "a backup", with the shape named.
+
+## D34 — The import file picker is tested through `importFile(at:)`, not through the panel
+
+**What.** `File ▸ Import…` and the sidebar's drop target are covered by tests that call
+`AppState.importData` / `importFile(at:)` directly. The `NSOpenPanel` step itself was not driven
+by hand.
+
+**Why.** A sandboxed app gets its open panel from
+`com.apple.appkit.xpc.openAndSavePanelService`, a separate process. Its contents do not appear in
+the app's accessibility tree (the window reports a single UI element), and synthesized keystrokes
+sent through System Events — ⌘⇧G, type-select, Return — do not reach it. Drag-and-drop cannot be
+synthesized here either.
+
+**What changed.** Nothing in the app. What the panel returns is a `URL`, and everything after that
+URL is tested. The acceptance that mattered — an imported request actually sending — is covered by
+`make live-test`, which imports a Postman export and sends two of its requests to httpbin.
+
+## D35 — Live tests need `TEST_RUNNER_`-prefixed environment variables
+
+**What.** `make live-test` passes `TEST_RUNNER_POSTFRAU_LIVE_TESTS=1`, not
+`POSTFRAU_LIVE_TESTS=1`, to the app test bundle.
+
+**Why.** `xcodebuild` does not forward the invoking shell's environment to the test host, so
+`.enabled(if: ProcessInfo…environment["POSTFRAU_LIVE_TESTS"] == "1")` silently skipped the whole
+suite — a green run that had tested nothing. `TEST_RUNNER_<NAME>` is the documented way in; the
+prefix is stripped before the host sees it. The Core package tests read the plain name, because
+SwiftPM does pass the shell environment through.

@@ -103,7 +103,9 @@ extension AppState {
         try RequestBuilder().build(request, resolver: resolver, effectiveAuth: auth)
     }
 
-    static func message(for error: any Error) -> String {
+    /// The sentence to show a user for an error. `nonisolated` because parsing and importing
+    /// happen off the main actor and still need to name what went wrong.
+    nonisolated static func message(for error: any Error) -> String {
         (error as? any LocalizedError)?.errorDescription ?? error.localizedDescription
     }
 

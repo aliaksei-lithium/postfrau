@@ -82,6 +82,10 @@ struct EnvironmentsWindow: View {
                 + (state.workspace.activeEnvironmentID == environment.id ? ", active" : ""))
         .contextMenu {
             Button("Make Active") { state.setActiveEnvironment(environment.id) }
+            Button("Export as Postman Environment…") {
+                state.exportEnvironment(environment.id)
+            }
+            Divider()
             Button("Duplicate") {
                 if let copy = state.duplicateEnvironment(id: environment.id) {
                     selection = .environment(copy.id)

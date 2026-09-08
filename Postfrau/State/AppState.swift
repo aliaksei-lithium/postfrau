@@ -73,6 +73,8 @@ final class AppState {
     var dataFolderProblem: String?
     /// Documents iCloud has been asked for but has not delivered yet, for the sidebar spinner.
     var downloadingDocuments: Set<UUID> = []
+    /// What the last import did, shown in a sheet. Nil when there is nothing worth saying.
+    var importReport: ImportReport?
     /// The security-scoped URL whose access is open for the life of the process.
     @ObservationIgnored var securityScopedRoot: URL?
     @ObservationIgnored var folderWatcher: FolderWatcher?

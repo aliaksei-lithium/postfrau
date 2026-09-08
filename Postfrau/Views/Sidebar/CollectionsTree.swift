@@ -130,6 +130,8 @@ struct CollectionRow: View {
         Button("Rename…") { beginRename() }
         Button("Duplicate") { state.duplicateCollection(id: collection.id) }
         Divider()
+        Button("Export as Postman Collection…") { state.exportCollection(collection.id) }
+        Divider()
         Button("Delete…", role: .destructive) { isConfirmingDelete = true }
     }
 

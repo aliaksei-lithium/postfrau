@@ -87,3 +87,21 @@ extension FileDialogs {
         NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 }
+
+extension FileDialogs {
+    /// The open panel for File ▸ Import.
+    ///
+    /// Deliberately permissive about types: people keep curl commands in `.txt`, `.sh` and files
+    /// with no extension at all, and the importer works out what a file is by reading it.
+    static func chooseFileForImport() -> URL? {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Import"
+        panel.message = "Choose a Postman collection, a Postman environment, or a curl command."
+        panel.allowedContentTypes = [.json, .plainText, .shellScript, .data]
+        panel.allowsOtherFileTypes = true
+        return panel.runModal() == .OK ? panel.url : nil
+    }
+}

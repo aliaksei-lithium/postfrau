@@ -74,7 +74,7 @@ extension AppState {
 
     // MARK: - Secrets
 
-    private func persistSecrets(for environment: RequestEnvironment, previous: [Variable]) {
+    func persistSecrets(for environment: RequestEnvironment, previous: [Variable] = []) {
         persistSecrets(
             variables: environment.variables, previous: previous, scope: environment.id)
     }

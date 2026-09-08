@@ -18,7 +18,13 @@ struct URLBar: View {
                 placeholder: "Enter a URL",
                 resolver: state.resolver(for: tab),
                 onSubmit: { state.send(tab) },
-                onChange: { _ in state.draftChanged(tab) })
+                onChange: { text in
+                    // Pasting a curl command into the URL field fills in the whole request —
+                    // method, headers, auth and body — rather than leaving the command sitting
+                    // there as a URL that cannot be sent.
+                    guard !state.handlePastedCurl(text, into: tab) else { return }
+                    state.draftChanged(tab)
+                })
             .frame(height: 26)
             .background(
                 RoundedRectangle(cornerRadius: 6)
