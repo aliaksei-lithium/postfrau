@@ -55,7 +55,7 @@ git commit. Tick the checkboxes in this file as you go so progress survives cont
 
 ### Out of scope (v1)
 Collaboration, sync, accounts, workspaces, mock servers, monitors, load tests, scripting, GraphQL,
-WebSocket/gRPC/SSE, code-snippet generation, OpenAPI import, cookie-jar editor, proxy configuration
+WebSocket/gRPC/SSE, code-snippet generation, cookie-jar editor, proxy configuration *(OpenAPI import shipped in v1.1)*
 UI (system proxy is used automatically), client certificates, Windows/Linux.
 
 ---
@@ -718,7 +718,7 @@ Goal: an agent with only Bash and `skills/postfrau/SKILL.md` can inspect and edi
   Imported `event[]` extras become editable.
 - **WebSocket / SSE:** separate `Item` kind and a streaming response pane; `URLSessionWebSocketTask`.
 - **Code generation:** `CurlFormatter` generalizes to a `SnippetGenerator` protocol (Swift/URLSession, Python/requests, JS/fetch…).
-- **OpenAPI import:** new `Interop/OpenAPIImporter` producing a `Collection`.
+- ~~**OpenAPI import:** new `Interop/OpenAPIImporter` producing a `Collection`.~~ **Done in v1.1** as `Transfer/OpenAPI.swift` — see `docs/decisions.md` D44.
 - **Cookie jar UI:** expose the per-profile `HTTPCookieStorage`.
 - **MCP server:** `postfrau mcp` — stdio JSON-RPC over the same `Commands` layer, one tool per command; only if an environment allows MCP. No new logic.
 - **App Intents:** expose `SendRequest` and `RunFolder` to Shortcuts/Spotlight; same command layer.

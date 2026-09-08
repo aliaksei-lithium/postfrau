@@ -25,7 +25,7 @@ enum Help {
           ls [path] [--tree]              what is in a collection or folder
           get <path> [--var k=v]          one request, and what it resolves to
           schema [collection|request|environment|history]
-          validate <file>                 can Postfrau read this file?
+          validate <file>                 what is this file, and what would be lost?
 
         \(out.bold("EDITING"))
           add <folder-path> --url … | --from-curl '…' | --file f.json | --stdin
@@ -51,7 +51,7 @@ enum Help {
           history show <id>
 
         \(out.bold("TRANSFER"))
-          import <file>                   a Postman collection or environment
+          import <file>                   OpenAPI 3.x (JSON), or Postman collection/environment
           export <collection|environment> [--out file]
           open <path>                     show it in the app
 

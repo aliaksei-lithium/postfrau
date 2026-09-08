@@ -96,6 +96,13 @@ extension AppState {
     /// Sniffing and parsing, off the main thread: a large Postman export is a real parse.
     @concurrent
     static func decodeImport(_ data: Data, named name: String) async -> ImportOutcome {
+        // A YAML OpenAPI document is neither curl nor JSON; say what to do about it rather than
+        // letting it fall through to "this is not JSON".
+        if OpenAPIImporter.looksLikeYAML(data) {
+            return .failure(
+                OpenAPIImporter.ImportError.looksLikeYAML.localizedDescription)
+        }
+
         // curl first: a saved command is text, and text is never valid JSON here.
         if let text = String(data: data, encoding: .utf8), CurlParser.looksLikeCurl(text) {
             do {
@@ -116,6 +123,17 @@ extension AppState {
         if PostmanEnvironment.looksLikeEnvironment(object) {
             do { return .environment(try PostmanEnvironment.import(object)) }
             catch { return .failure(message(for: error)) }
+        }
+
+        // Checked before Postman: an OpenAPI document has an `info` block too, so the Postman
+        // importer would accept it and produce a collection with no requests in it.
+        if OpenAPIImporter.looksLikeOpenAPI(object) {
+            do {
+                let result = try OpenAPIImporter().import(object)
+                return .collection(result.collection, warnings: result.warnings)
+            } catch {
+                return .failure(message(for: error))
+            }
         }
 
         do {

@@ -19,8 +19,21 @@ The app is ad-hoc signed, so the first launch needs **right-click → Open** onc
 - Environments and globals; secrets live in the Keychain, never in the files
 - History of every send, redacted by default
 - Sync by pointing the data folder at iCloud Drive, Dropbox or a git checkout
-- Import/export Postman v2.1 and cURL, both directions
+- Import OpenAPI 3.x; import/export Postman v2.1 and cURL, both directions
 - `postfrau` CLI that does all of the above from a shell
+
+## Importing an API
+
+```bash
+postfrau import openapi.json     # OpenAPI 3.x, or a Postman collection/environment
+```
+
+Or **File ▸ Import…**, or drop the file on the sidebar.
+
+An OpenAPI import produces a collection you can send from: `servers[0]` becomes `{{baseUrl}}`,
+tags become folders, path templates become `{{variables}}`, security becomes the collection's
+auth, and bodies come from the spec's examples — or are synthesised from its schemas. JSON only;
+convert YAML first with `yq -o=json spec.yaml > spec.json`.
 
 ## CLI
 

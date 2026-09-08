@@ -86,6 +86,63 @@ struct AppTransferTests {
         #expect(state.importReport == nil, "a clean import says nothing")
     }
 
+    @Test func importsAnOpenAPIDocument() async throws {
+        let (state, scratch) = makeState()
+        defer { try? FileManager.default.removeItem(at: scratch) }
+
+        await state.importData(Data("""
+        {"openapi":"3.0.3","info":{"title":"Acme Pets","version":"1.0"},
+         "servers":[{"url":"https://api.acme.dev"}],
+         "security":[{"bearerAuth":[]}],
+         "paths":{"/pets/{petId}":{"get":{"tags":["Pets"],"summary":"Get a pet",
+           "parameters":[{"name":"petId","in":"path","required":true,
+                          "schema":{"type":"string"}}],"responses":{}}}},
+         "components":{"securitySchemes":{"bearerAuth":{"type":"http","scheme":"bearer"}}}}
+        """.utf8), named: "petstore.json")
+
+        let collection = try #require(state.workspace.collections.first)
+        #expect(collection.name == "Acme Pets")
+        #expect(collection.auth == .bearer(token: "{{token}}"))
+        #expect(collection.variables.first?.value == "https://api.acme.dev")
+
+        let request = try #require(collection.allRequests().first?.request)
+        #expect(request.name == "Get a pet")
+        #expect(request.url == "{{baseUrl}}/pets/{{petId}}")
+
+        // The sheet tells the user the path variable still needs a value.
+        #expect(state.importReport?.warnings.contains { $0.contains("path variables") } == true)
+    }
+
+    @Test func anOpenAPIDocumentIsNotMistakenForAPostmanCollection() async throws {
+        // Both have an `info` block, and the Postman importer is lenient enough to accept one
+        // and hand back a collection with nothing in it.
+        let (state, scratch) = makeState()
+        defer { try? FileManager.default.removeItem(at: scratch) }
+
+        await state.importData(Data("""
+        {"openapi":"3.0.0","info":{"title":"X","version":"1"},
+         "paths":{"/a":{"get":{"summary":"A","responses":{}}}}}
+        """.utf8), named: "spec.json")
+
+        let collection = try #require(state.workspace.collections.first)
+        #expect(collection.requestCount == 1, "the operation became a request")
+    }
+
+    @Test func aYamlSpecSaysHowToConvertIt() async {
+        let (state, scratch) = makeState()
+        defer { try? FileManager.default.removeItem(at: scratch) }
+
+        await state.importData(Data("""
+        openapi: 3.0.0
+        info:
+          title: Acme
+        paths: {}
+        """.utf8), named: "spec.yaml")
+
+        #expect(state.workspace.collections.isEmpty)
+        #expect(state.importReport?.detail.contains("yq") == true)
+    }
+
     @Test func saysSoWhenAFileIsNeitherThing() async {
         let (state, scratch) = makeState()
         defer { try? FileManager.default.removeItem(at: scratch) }

@@ -10,10 +10,10 @@ enum SkillDocument {
 ---
 name: postfrau
 description: >
-  Inspect and edit HTTP request collections, send requests, and read the history of what was
-  sent, using the `postfrau` command line tool. Use this whenever the user mentions postfrau,
-  an API collection, running or sending a saved request, or asks to try an HTTP endpoint and
-  keep it for later.
+  Inspect and edit HTTP request collections, send requests, import an OpenAPI or Postman
+  specification, and read the history of what was sent, using the `postfrau` command line tool.
+  Use this whenever the user mentions postfrau, an API collection, an OpenAPI or Swagger spec,
+  running or sending a saved request, or asks to try an HTTP endpoint and keep it for later.
 ---
 
 # postfrau
@@ -100,6 +100,21 @@ postfrau env set Staging token=abc123 --secret
 postfrau env use Staging
 postfrau env get Staging                     # secrets print as •••
 ```
+
+### Importing a specification
+
+```bash
+postfrau validate api.json      # what is this file, and what will be lost?
+postfrau import api.json        # OpenAPI 3.x, or a Postman collection or environment
+```
+
+An OpenAPI import gives you a sendable collection, not a transcription: `servers[0]` becomes
+`{{baseUrl}}`, tags become folders, path templates become `{{variables}}` to fill in, security
+becomes the collection's auth with `{{token}}` placeholders, and a request body is built from the
+spec's example — or synthesised from its schema when it gives none. Read the warnings: they name
+what could not be modelled.
+
+JSON only. For a YAML spec, convert it first: `yq -o=json spec.yaml > spec.json`.
 
 ### History
 

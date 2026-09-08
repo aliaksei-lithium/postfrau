@@ -18,7 +18,10 @@ enum Transfer {
         guard let root = try? Postfrau.makeDecoder().decode(JSONValue.self, from: data),
               let object = root.objectValue
         else {
-            out.error("\(path) is not JSON. For a curl command, use `postfrau add --from-curl`.")
+            out.error(
+                OpenAPIImporter.looksLikeYAML(data)
+                    ? OpenAPIImporter.ImportError.looksLikeYAML.localizedDescription
+                    : "\(path) is not JSON. For a curl command, use `postfrau add --from-curl`.")
             return .usage
         }
 
@@ -40,7 +43,11 @@ enum Transfer {
             return .ok
         }
 
-        let result = try PostmanV21Importer().import(object)
+        // OpenAPI before Postman: both have an `info` block, and the Postman importer would
+        // accept an OpenAPI document and produce a collection with nothing in it.
+        let result = OpenAPIImporter.looksLikeOpenAPI(object)
+            ? try OpenAPIImporter().import(object).asPostmanResult
+            : try PostmanV21Importer().import(object)
         try await runner.importCollection(result.collection)
         for warning in result.warnings { out.warning(warning) }
 

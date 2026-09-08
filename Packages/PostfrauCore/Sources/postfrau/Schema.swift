@@ -126,6 +126,22 @@ enum Validate {
             return .usage
         }
 
+        // Checked before Postman and before Postfrau's own format: an OpenAPI document has an
+        // `info` block, and both of those decoders are lenient enough to accept it and report
+        // something misleading.
+        if OpenAPIImporter.looksLikeOpenAPI(object) {
+            do {
+                let result = try OpenAPIImporter().import(object)
+                out.print(
+                    "ok: an OpenAPI document, \(result.collection.requestCount) operation(s)")
+                for warning in result.warnings { out.warning(warning) }
+                return .ok
+            } catch {
+                out.error(CommandRunner.message(for: error))
+                return .usage
+            }
+        }
+
         if PostmanEnvironment.looksLikeEnvironment(object) {
             do {
                 let environment = try PostmanEnvironment.import(object)

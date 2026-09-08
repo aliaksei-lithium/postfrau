@@ -1,0 +1,127 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Acme Pets",
+    "description": "A small API to measure the importer against.",
+    "version": "1.4.0"
+  },
+  "servers": [
+    { "url": "https://{region}.api.acme.dev/{version}",
+      "variables": {
+        "region": { "default": "eu", "enum": ["eu", "us"] },
+        "version": { "default": "v1" } } }
+  ],
+  "security": [{ "bearerAuth": [] }],
+  "tags": [{ "name": "Pets" }, { "name": "Owners" }],
+  "paths": {
+    "/pets": {
+      "parameters": [
+        { "name": "X-Request-Id", "in": "header", "required": false,
+          "schema": { "type": "string", "format": "uuid" } }
+      ],
+      "get": {
+        "tags": ["Pets"],
+        "summary": "List pets",
+        "description": "Paginated. Returns at most `limit` pets.",
+        "parameters": [
+          { "name": "limit", "in": "query", "required": true,
+            "description": "How many to return.",
+            "schema": { "type": "integer", "default": 25 } },
+          { "name": "status", "in": "query", "required": false,
+            "schema": { "type": "string", "enum": ["available", "sold"] } }
+        ],
+        "responses": { "200": { "description": "OK" } }
+      },
+      "post": {
+        "tags": ["Pets"],
+        "operationId": "createPet",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/Pet" }
+            }
+          }
+        },
+        "responses": { "201": { "description": "Created" } }
+      }
+    },
+    "/pets/{petId}": {
+      "get": {
+        "tags": ["Pets"],
+        "summary": "Get a pet",
+        "parameters": [
+          { "name": "petId", "in": "path", "required": true,
+            "schema": { "type": "string", "format": "uuid" } }
+        ],
+        "responses": { "200": { "description": "OK" } }
+      },
+      "delete": {
+        "tags": ["Pets"],
+        "summary": "Delete a pet",
+        "security": [{ "apiKeyAuth": [] }],
+        "parameters": [
+          { "name": "petId", "in": "path", "required": true,
+            "schema": { "type": "string" } }
+        ],
+        "responses": { "204": { "description": "Gone" } }
+      }
+    },
+    "/owners/login": {
+      "post": {
+        "tags": ["Owners"],
+        "summary": "Log in",
+        "security": [],
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "required": ["username", "password"],
+                "properties": {
+                  "username": { "type": "string" },
+                  "password": { "type": "string", "format": "password" },
+                  "remember": { "type": "boolean" }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "OK" } }
+      }
+    },
+    "/health": {
+      "get": {
+        "summary": "Health",
+        "responses": { "200": { "description": "OK" } }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": { "type": "http", "scheme": "bearer" },
+      "apiKeyAuth": { "type": "apiKey", "name": "X-Api-Key", "in": "header" }
+    },
+    "schemas": {
+      "Pet": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "name": { "type": "string", "example": "Rex" },
+          "age": { "type": "integer" },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "owner": { "$ref": "#/components/schemas/Owner" },
+          "friend": { "$ref": "#/components/schemas/Pet" }
+        }
+      },
+      "Owner": {
+        "type": "object",
+        "properties": {
+          "email": { "type": "string", "format": "email" },
+          "since": { "type": "string", "format": "date" }
+        }
+      }
+    }
+  }
+}

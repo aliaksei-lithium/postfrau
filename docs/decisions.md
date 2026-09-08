@@ -544,3 +544,39 @@ earlier. Polling asks the kernel directly and cannot deadlock against anything.
 The writer script is bounded too, for a related reason: an unbounded `while true` loop spawns `mv`
 faster than the system reaps it, and the wait then queues behind thousands of orphans. Four
 hundred writes land the kill just as unpredictably and always terminate.
+
+## D44 — OpenAPI import reads JSON only, and builds sendable requests
+
+**What.** `Transfer/OpenAPI.swift` imports OpenAPI 3.0 and 3.1 documents. It is offered by
+File ▸ Import, the sidebar drop target and `postfrau import`, all through the same sniffing that
+already told Postman collections from environments from cURL.
+
+**JSON only.** OpenAPI is as often YAML, and a YAML parser is a third-party dependency (§0
+forbids them). The subset needed is not small enough to hand-roll honestly — anchors, block
+scalars and flow style are where a naive parser quietly gets it wrong. A YAML document is
+therefore *detected* and told what to do about it (`yq -o=json`) rather than failing as "not
+JSON".
+
+**A collection you can send from, not a transcription.** A spec describes what an endpoint
+accepts; a request has to carry something concrete. So:
+
+- `servers[0]` becomes `{{baseUrl}}`, with its own `{template}` variables filled from their
+  declared defaults, so one variable repoints the whole collection.
+- Path templates become `{{petId}}` — Postfrau variables the user can fill in, rather than braces
+  that would be sent literally.
+- Tags become folders in the order the document declares them, which is the order its authors
+  chose and the order every other OpenAPI tool shows. A document with no tags at all falls back
+  to grouping by first path segment; mixing the two would give a mostly-tagged document one odd
+  folder named after a path.
+- A required parameter is enabled, an optional one is not, so the first send is the minimal one
+  that ought to work.
+- Bodies come from `example`, then `examples`, then are synthesised from the schema. An empty
+  body is far less use than a shaped one to edit.
+
+**Two things the first real run caught.** The "N requests have path variables" warning counted
+every request, because every URL contains `{{baseUrl}}`. And a self-referential schema (`Pet.friend`
+is a `Pet`) expanded to the depth limit — six nested copies. Example synthesis now tracks the
+`$ref` chain and stops the second time it sees one, giving exactly one readable level.
+
+**Local `$ref` only.** A remote or file reference would mean fetching something the user did not
+ask us to fetch, from a URL inside a file they may have been handed. That is their decision.
