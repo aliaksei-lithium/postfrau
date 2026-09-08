@@ -93,7 +93,10 @@ enum Run {
 
     // MARK: - Reporting
 
-    private static func finish(
+    /// Not private: the loopback API path in `RemoteAPI` reports a result the same way, so that
+    /// `postfrau run` prints and exits identically whether the workspace was read here or by the
+    /// app on the other end of a socket.
+    static func finish(
         _ result: RunResult, _ arguments: Arguments, _ out: Output
     ) -> ExitCode {
         if let path = arguments.value("--out"), let body = result.body {

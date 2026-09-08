@@ -13,6 +13,27 @@ struct AdvancedSettings: View {
     /// this window re-evaluates it, and four `stat` calls per redraw is four too many.
     @State private var installedPath: String?
     @State private var hasBundledTool = false
+    /// Whether the token is on screen. Off by default: it is a credential, and Settings gets
+    /// screen-shared and screenshotted like any other window.
+    @State private var showsToken = false
+    @State private var copied = false
+
+    /// The two lines someone pastes into a shell or an agent's environment.
+    private var shellExport: String {
+        """
+        export \(LocalAPI.tokenVariable)=\(state.settings.localAPIToken)
+        export \(LocalAPI.urlVariable)=\(LocalAPI.defaultURL(port: state.settings.localAPIPort))
+        """
+    }
+
+    private func copyExport() {
+        Pasteboard.copy(shellExport)
+        copied = true
+        Task {
+            try? await Task.sleep(for: .seconds(2))
+            copied = false
+        }
+    }
 
     var body: some View {
         Form {
@@ -48,6 +69,69 @@ struct AdvancedSettings: View {
                         + "for agents. It shares this workspace and writes to the same history. "
                         + "Postfrau links it into a folder you choose; it never asks for an "
                         + "administrator password.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            }
+
+            Section {
+                Toggle("Answer the postfrau CLI over localhost", isOn: Binding(
+                    get: { state.settings.localAPIEnabled },
+                    set: { enabled in
+                        // A token is minted the first time it is switched on, not at launch, so a
+                        // workspace that never uses this never stores a credential.
+                        if enabled && state.settings.localAPIToken.isEmpty {
+                            state.settings.localAPIToken = LocalAPI.makeToken()
+                        }
+                        state.settings.localAPIEnabled = enabled
+                        state.markSettingsDirty()
+                    }))
+
+                if state.settings.localAPIEnabled {
+                    LabeledContent("Port") {
+                        TextField("Port", value: Binding(
+                            get: { state.settings.localAPIPort },
+                            set: { state.settings.localAPIPort = $0; state.markSettingsDirty() }),
+                            format: .number.grouping(.never))
+                        .labelsHidden()
+                        .frame(width: 80)
+                        .multilineTextAlignment(.trailing)
+                    }
+
+                    LabeledContent("Token") {
+                        HStack(spacing: 8) {
+                            Text(showsToken ? state.settings.localAPIToken : "••••••••••••••••")
+                                .font(.system(.callout, design: .monospaced))
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .textSelection(.enabled)
+                            Button(showsToken ? "Hide" : "Show") { showsToken.toggle() }
+                            Button("New") {
+                                state.settings.localAPIToken = LocalAPI.makeToken()
+                                state.markSettingsDirty()
+                            }
+                            .help("Mint a new token. Anything using the old one stops working.")
+                        }
+                    }
+
+                    Button(copied ? "Copied" : "Copy Shell Export") { copyExport() }
+                }
+
+                if let error = state.localAPIError {
+                    Text(error)
+                        .font(.callout)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            } header: {
+                Text("Local API")
+            } footer: {
+                Text(
+                    "For an agent that cannot read your workspace — a sandbox that denies the "
+                        + "folder, or this app's container. With the token in its environment, "
+                        + "`postfrau ls`, `get`, `run` and `send` ask this app instead of the "
+                        + "filesystem, and sends still land in your history. The socket listens "
+                        + "on 127.0.0.1 only and refuses anything without the token; it works "
+                        + "only while Postfrau is running.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
             }

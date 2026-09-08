@@ -8,7 +8,11 @@ enum Browse {
     ) async throws -> ExitCode {
         let path = arguments.positional(0)
         let rows = try await runner.list(path: path, recursive: arguments.has("--tree"))
+        return render(rows, arguments, out)
+    }
 
+    /// Printing, split from fetching so the loopback API renders exactly what a local run does.
+    static func render(_ rows: [ListedItem], _ arguments: Arguments, _ out: Output) -> ExitCode {
         if out.isJSON {
             out.json(rows)
             return .ok
@@ -46,8 +50,11 @@ enum Browse {
         }
         let overrides = Dictionary(
             arguments.pairs("--var"), uniquingKeysWith: { _, new in new })
-        let detail = try await runner.detail(path: path, overrides: overrides)
+        return render(try await runner.detail(path: path, overrides: overrides), out)
+    }
 
+    /// Printing, split from fetching, for the same reason as `render(_:_:_:)` above.
+    static func render(_ detail: RequestDetail, _ out: Output) -> ExitCode {
         if out.isJSON {
             out.json(detail)
             return .ok

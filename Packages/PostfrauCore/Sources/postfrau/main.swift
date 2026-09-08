@@ -51,12 +51,24 @@ enum CLI {
         let parsed = all.droppingVerb()
 
         switch verb {
-        case "version": Help.version(out); return .ok
+        case "version":
+            if let endpoint = RemoteAPI.fromEnvironment() {
+                return await RemoteAPI.run(verb: verb, parsed, endpoint, out)
+            }
+            Help.version(out)
+            return .ok
         case "help": Help.usage(out); return .ok
         case "schema": return Schema.run(parsed, out)
         case "validate": return Validate.run(parsed, out)
         case "skill": return Skill.run(parsed, out)
         default: break
+        }
+
+        // With a token set, the workspace lives behind the app rather than on a disk this
+        // process can read. Checked before resolving a data folder, because the whole point is
+        // that there may not be one.
+        if let endpoint = RemoteAPI.fromEnvironment() {
+            return await RemoteAPI.run(verb: verb, parsed, endpoint, out)
         }
 
         // Everything else needs the workspace.

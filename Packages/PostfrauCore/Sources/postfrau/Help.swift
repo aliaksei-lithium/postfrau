@@ -68,6 +68,12 @@ enum Help {
           --quiet           only errors
           --help            help for a command
 
+        \(out.bold("WHEN THE WORKSPACE IS UNREADABLE"))
+          Set POSTFRAU_API_TOKEN (Settings ▸ Advanced ▸ Local API) and ls, get, run, send and
+          version ask the running app over 127.0.0.1 instead of the filesystem — for a sandbox
+          that denies the folder, where --data-dir cannot help. POSTFRAU_API_URL overrides the
+          address. Other commands need a real folder and will say so.
+
         \(out.bold("EXIT CODES"))
           0 ok · 1 usage · 2 not found · 3 network · 4 HTTP >= 400 with --fail
           5 data folder unavailable

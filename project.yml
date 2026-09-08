@@ -18,7 +18,7 @@ packages:
 settings:
   base:
     SWIFT_VERSION: "6.0"
-    MARKETING_VERSION: "1.5"
+    MARKETING_VERSION: "1.6"
     CURRENT_PROJECT_VERSION: "1"
     DEVELOPMENT_TEAM: ""
     CODE_SIGN_STYLE: Manual
@@ -66,10 +66,14 @@ targets:
             CFBundleURLSchemes:
               - postfrau
     entitlements:
+      # Declared here, not in the .entitlements file: XcodeGen regenerates that file from this
+      # block on every `make gen`, so an edit made there is silently thrown away.
       path: Postfrau/Resources/Postfrau.entitlements
       properties:
         com.apple.security.app-sandbox: true
         com.apple.security.network.client: true
+        # Settings ▸ Advanced ▸ Local API. A sandboxed app cannot listen on a socket without it.
+        com.apple.security.network.server: true
         com.apple.security.files.user-selected.read-write: true
         com.apple.security.files.bookmarks.app-scope: true
     settings:

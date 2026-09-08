@@ -185,10 +185,38 @@ from one request is visible to the ones after it, so a whole folder can log in a
 If the capture matches nothing, the command exits 2 and says so — the request itself still
 succeeded, and is in the history.
 
+## When you cannot read the workspace at all
+
+If you are in a sandbox that denies the collections folder — or the app's container under
+`~/Library/Containers` — no value of `--data-dir` will help: the files are unreadable, not
+misplaced. `postfrau` can ask the running app instead, over a loopback socket.
+
+Set one variable and every command below goes to the app, which does the file access itself:
+
+```
+export POSTFRAU_API_TOKEN=<the token from Settings ▸ Advanced ▸ Local API>
+export POSTFRAU_API_URL=http://127.0.0.1:7717     # only if the port was changed
+```
+
+`ls`, `get`, `run`, `send` and `version` work exactly as they do locally, print the same output
+and return the same exit codes. Sends still land in the user's history, attributed. Everything
+else — `add`, `set`, `mv`, `rm`, `import`, `export`, `history`, `env` — needs a real folder and
+will say so rather than half-work.
+
+So the way to do a job in a sandbox is: `postfrau ls` to see what exists, `postfrau ls <collection>`
+and `postfrau get <path>` to find the request you want, then `postfrau run <path>` — or
+`postfrau send METHOD URL -H …` when nothing saved fits.
+
+The user turns this on in Settings ▸ Advanced ▸ Local API; it works only while Postfrau is
+running. If a command reports that it cannot reach the app, say so and ask them to check that
+switch — do not start copying their files somewhere readable instead.
+
 ## When something is not working
 
-- `postfrau version` prints which data folder is in use and where it came from.
+- `postfrau version` prints which data folder is in use and where it came from — or, with
+  `POSTFRAU_API_TOKEN` set, which app it is talking to.
 - Exit code 5 means the folder is not available: an unmounted volume, or a path the app has
-  since changed. `--data-dir` points at one explicitly.
+  since changed. `--data-dir` points at one explicitly. If the folder is *unreadable* rather than
+  wrong, use the local API above.
 - A secret that will not resolve may be a Keychain prompt nobody answered. Supply it for one
   command with `POSTFRAU_SECRET_<KEY>=value` in the environment instead.

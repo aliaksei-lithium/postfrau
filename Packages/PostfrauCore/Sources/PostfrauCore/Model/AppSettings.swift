@@ -54,6 +54,15 @@ public struct AppSettings: Sendable, Hashable, Codable {
     public var allowPreviewJavaScript: Bool
     public var wrapResponseLines: Bool
     public var showResponseLineNumbers: Bool
+    /// Whether the app answers `postfrau` over a loopback socket. Off until asked for.
+    public var localAPIEnabled: Bool
+    public var localAPIPort: Int
+    /// The bearer token for that socket. Empty until the API is first switched on.
+    ///
+    /// Kept here, in plain sight, on purpose: this file already sits beside the workspace, so
+    /// anything that can read the token could read the collections directly. Putting it in the
+    /// Keychain instead would buy nothing and cost the CLI a prompt nobody can answer.
+    public var localAPIToken: String
 
     public init(
         dataFolderBookmark: Data? = nil,
@@ -69,7 +78,10 @@ public struct AppSettings: Sendable, Hashable, Codable {
         historyBodyCapBytes: Int = 262_144,
         allowPreviewJavaScript: Bool = false,
         wrapResponseLines: Bool = true,
-        showResponseLineNumbers: Bool = false
+        showResponseLineNumbers: Bool = false,
+        localAPIEnabled: Bool = false,
+        localAPIPort: Int = LocalAPI.defaultPort,
+        localAPIToken: String = ""
     ) {
         self.dataFolderBookmark = dataFolderBookmark
         self.dataFolderPath = dataFolderPath
@@ -85,6 +97,9 @@ public struct AppSettings: Sendable, Hashable, Codable {
         self.allowPreviewJavaScript = allowPreviewJavaScript
         self.wrapResponseLines = wrapResponseLines
         self.showResponseLineNumbers = showResponseLineNumbers
+        self.localAPIEnabled = localAPIEnabled
+        self.localAPIPort = localAPIPort
+        self.localAPIToken = localAPIToken
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -93,6 +108,7 @@ public struct AppSettings: Sendable, Hashable, Codable {
         case editorFontSize, responseLayout, defaultTimeoutSeconds, defaultVerifyTLS
         case maxHistoryEntries, allowPreviewJavaScript, wrapResponseLines, showResponseLineNumbers
         case historyRecording, historyBodyCapBytes
+        case localAPIEnabled, localAPIPort, localAPIToken
     }
 
     public init(from decoder: any Decoder) throws {
@@ -118,6 +134,9 @@ public struct AppSettings: Sendable, Hashable, Codable {
         wrapResponseLines = try c.decodeIfPresent(Bool.self, forKey: .wrapResponseLines) ?? d.wrapResponseLines
         showResponseLineNumbers =
             try c.decodeIfPresent(Bool.self, forKey: .showResponseLineNumbers) ?? d.showResponseLineNumbers
+        localAPIEnabled = try c.decodeIfPresent(Bool.self, forKey: .localAPIEnabled) ?? d.localAPIEnabled
+        localAPIPort = try c.decodeIfPresent(Int.self, forKey: .localAPIPort) ?? d.localAPIPort
+        localAPIToken = try c.decodeIfPresent(String.self, forKey: .localAPIToken) ?? d.localAPIToken
     }
 
     public func encode(to encoder: any Encoder) throws {
@@ -137,5 +156,8 @@ public struct AppSettings: Sendable, Hashable, Codable {
         try c.encode(allowPreviewJavaScript, forKey: .allowPreviewJavaScript)
         try c.encode(wrapResponseLines, forKey: .wrapResponseLines)
         try c.encode(showResponseLineNumbers, forKey: .showResponseLineNumbers)
+        try c.encode(localAPIEnabled, forKey: .localAPIEnabled)
+        try c.encode(localAPIPort, forKey: .localAPIPort)
+        try c.encode(localAPIToken, forKey: .localAPIToken)
     }
 }

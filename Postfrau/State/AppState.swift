@@ -260,6 +260,7 @@ final class AppState {
     func load() async {
         settings = await store.loadSettings()
         applyAppearance()
+        applyLocalAPI()
         await history.setMaxEntries(settings.maxHistoryEntries)
         await resolveDataFolder()
 
@@ -445,9 +446,10 @@ final class AppState {
     }
     func markSettingsDirty() {
         settingsDirty = true
-        // Every settings change comes through here, so this is the one place the appearance can
-        // be applied without each control having to remember to.
+        // Every settings change comes through here, so this is the one place the appearance and
+        // the loopback API can be applied without each control having to remember to.
         applyAppearance()
+        applyLocalAPI()
     }
 
     /// Applies the light/dark preference to the whole app.
@@ -455,6 +457,67 @@ final class AppState {
     /// Set on `NSApplication` rather than with `preferredColorScheme` on a view: Postfrau has
     /// three windows — main, Environments and Settings — and the menu bar besides, and only the
     /// application-level appearance covers all of them. `nil` means "follow the system".
+    /// The loopback API, when settings ask for one. Nil whenever it is switched off.
+    private var localAPI: LocalAPIServer?
+
+    /// Starts, stops or restarts the loopback API to match settings.
+    ///
+    /// Called from the same place as `applyAppearance()` — every settings change goes through
+    /// `markSettingsDirty()` — and once at launch. Restarting on every call would drop live
+    /// connections, so the port and token are compared first.
+    func applyLocalAPI() {
+        let wanted: (port: UInt16, token: String)? =
+            settings.localAPIEnabled && !settings.localAPIToken.isEmpty
+            ? (UInt16(clamping: settings.localAPIPort), settings.localAPIToken)
+            : nil
+
+        guard runningLocalAPI?.port != wanted?.port || runningLocalAPI?.token != wanted?.token
+        else { return }
+
+        let previous = localAPI
+        localAPI = nil
+        runningLocalAPI = wanted
+
+        guard let wanted else {
+            Task { await previous?.stop() }
+            return
+        }
+
+        // The store is an actor, so the folder it is using can only be read off the main actor —
+        // which is why the server is built inside the task rather than handed in ready-made.
+        let store = store, history = history, executor = executor, secrets = secretsStore
+        Task { [weak self] in
+            await previous?.stop()
+            let server = LocalAPIServer(
+                port: wanted.port, token: wanted.token,
+                runner: CommandRunner(
+                    store: store, history: history, executor: executor, secrets: secrets,
+                    source: .agent(name: "api")),
+                dataFolderPath: await store.folder.root.path)
+            do {
+                try await server.start()
+                self?.adopt(server)
+                self?.localAPIError = nil
+            } catch {
+                self?.reportLocalAPIFailure(error)
+            }
+        }
+    }
+
+    private func adopt(_ server: LocalAPIServer) { localAPI = server }
+
+    /// What the running server was built with, so an unchanged setting does not restart it.
+    private var runningLocalAPI: (port: UInt16, token: String)?
+
+    /// Surfaced in Settings ▸ Advanced; the usual cause is the port already being in use.
+    private(set) var localAPIError: String?
+
+    private func reportLocalAPIFailure(_ error: any Error) {
+        localAPIError = error.localizedDescription
+        settings.localAPIEnabled = false
+        settingsDirty = true
+    }
+
     func applyAppearance() {
         let wanted: NSAppearance? = switch settings.appearance {
         case .system: nil

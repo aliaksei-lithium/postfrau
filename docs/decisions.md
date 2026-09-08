@@ -680,3 +680,52 @@ Two trailing legs cost little at small sizes and settle the shape as a person in
 
 **The bun, not flowing hair.** Every attempt at streaming hair became either a blade or a smudge
 on the side of the head by 32 px. A single small circle overlapping the skull survives, and reads.
+
+## D48 — A loopback API, for an agent that cannot read the workspace
+
+**The problem.** An agent running in a sandbox tried to use the CLI and got exit 5: the data
+folder was "not available". No value of `--data-dir` fixes that. The folder is not misplaced, it
+is *unreadable* — the sandbox denies `~/Library/Containers`, and it would deny a user-chosen
+folder outside the project just as readily. The app is the only process on the machine that can
+read the workspace, because it is the one holding the security-scoped bookmark.
+
+**What was added.** Settings ▸ Advanced ▸ Local API. The app listens on 127.0.0.1 and answers
+five routes — ping, list, detail, run, send. With `POSTFRAU_API_TOKEN` in its environment the CLI
+forwards to the app instead of touching the filesystem, and prints the same output with the same
+exit codes, because both paths call the same renderers (`Browse.render`, `Run.finish`).
+
+**Deliberately not a general RPC.** `add`, `set`, `mv`, `rm`, `import`, `export`, `history` and
+`env` still need a real folder and say so. Forwarding whole argv would have made everything work
+at once, but the CLI's command layer lives in its own executable target and the app cannot import
+it; the alternative was moving that layer into Core for a use case nobody has asked for. Listing,
+finding and sending is what an agent needs.
+
+**The guards, and why each one.** All are covered by `PostfrauTests/LocalAPIServerTests.swift`
+against a real socket, because a broken guard here is invisible until it matters.
+
+- Loopback only, via `requiredLocalEndpoint`. Binding every interface would mean "only local
+  processes can reach it" stops being true the moment the Mac joins a café network.
+- A bearer token compared without an early return. `==` on `String` stops at the first differing
+  byte, and that timing is measurable over a socket.
+- The `Bearer` scheme is required. Splitting the header on a space and taking the last component
+  also accepts a bare `Authorization: <token>` — a test caught that, and one shape is better
+  than two.
+- Any request carrying `Origin`, or a `Host` that is not localhost, is refused before the token is
+  even read. A web page can be made to POST at a loopback port, and DNS rebinding can make a
+  hostile origin resolve to 127.0.0.1; neither can suppress `Origin` or forge `Host`.
+- Off by default, with no token stored until it is first switched on.
+
+**The token lives in `settings.json`, in plain sight.** It grants exactly what reading that file's
+neighbours already grants, so the Keychain would buy nothing — and it would cost the CLI a prompt
+nobody can answer (D-note: the same reason `--keychain` is opt-in).
+
+**Three things that cost time and are worth not repeating.**
+
+- `NWListener` reports a failed bind through `stateUpdateHandler`, not by throwing. Without
+  waiting for `.ready`, a listener that never bound is indistinguishable from one that did — the
+  app claimed an API that answered nothing.
+- Setting the port on `NWParameters.requiredLocalEndpoint` *and* passing it to
+  `NWListener(using:on:)` sets it twice, and the bind fails with `EINVAL`.
+- XcodeGen regenerates `Postfrau.entitlements` from `project.yml` on every `make gen`, exactly as
+  it does `Info.plist`. `com.apple.security.network.server` had to be declared in `project.yml`;
+  editing the entitlements file directly was silently undone, and the listener failed with EPERM.
