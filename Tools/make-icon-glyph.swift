@@ -2,33 +2,38 @@ import AppKit
 import CoreGraphics
 import Foundation
 
-// The Postfrau mark: a postwoman in flight, carrying a letter.
+// The Postfrau mark: a postwoman in flight.
 //
 // Regenerate the icon glyph with:
 //
 //     xcrun swiftc -O Tools/make-icon-glyph.swift -o /tmp/make-icon-glyph
 //     /tmp/make-icon-glyph Postfrau/Resources/Postfrau.icon/Assets/glyph.png
 //
-// It is a script rather than a checked-in drawing because the shape needed a dozen rounds of
-// "render it, look at it, move a control point"; keeping the geometry in source makes the next
-// round an edit instead of a redraw.
+// It is a script rather than a checked-in drawing because the shape took many rounds of
+// render-look-adjust; keeping the geometry in source makes the next round an edit, not a redraw.
 //
 // Drawn white on transparent so `icon.json`'s purple gradient shows through and macOS can derive
 // the tinted and clear appearances from the same shape.
 //
-// The figure is built UPRIGHT — feet at y = 0, head at the top — because anatomy is only easy to
-// get right standing up. The frame is then rotated so her body axis points up and to the right:
-// the classic flight pose, body along the direction of travel with the chest facing outward. In
-// the local frame, +x is her front and +y is the direction she is heading.
+// Shaped after Postman's mark, which is close to abstract: a detached circle and one tapered
+// wedge. So there are no separate arms here — the arm is a line cut *into* the body, which is
+// what keeps the silhouette legible at 32 px. Three things were each got wrong first and are
+// worth not re-discovering:
 //
-// Framing is measured rather than guessed: the figure is drawn once, its alpha bounding box is
-// read back, and the scale and offset that centre it in the icon's safe area are computed from
-// that before the final pass.
+//   * The figure is built UPRIGHT — feet at y = 0, head at the top — and the whole frame is then
+//     rotated into the climb. Drawing her already-diagonal turned every curve into guesswork and
+//     produced shapes that read as animals.
+//   * The hem bows *outward*. An inward-curving hem between two sharp corners is a fishtail.
+//   * Framing is measured, not guessed: a probe pass renders small and centred, its alpha
+//     bounding box is read back, and the scale and offset that centre her are computed from it.
+//     The `precondition` matters — a clipped probe reports the canvas as the bounding box and
+//     silently yields a cropped icon.
+//
+// In the local frame, +x is her front and +y is the direction she is heading.
 
 let size = 1024
-let safeInset = 34.0                        // macOS icon art keeps clear of the rounded corners
+let safeInset = 40.0                       // macOS icon art keeps clear of the rounded corners
 let white = CGColor(red: 1, green: 1, blue: 1, alpha: 1)
-let faint = CGColor(red: 1, green: 1, blue: 1, alpha: 0.34)
 
 func p(_ x: Double, _ y: Double) -> CGPoint { CGPoint(x: x, y: y) }
 
@@ -42,11 +47,10 @@ func newContext() -> CGContext {
 func render(into ctx: CGContext, scale: Double, dx: Double, dy: Double) {
     ctx.setAllowsAntialiasing(true)
 
-    func fill(_ path: CGMutablePath, _ colour: CGColor = white) {
-        ctx.addPath(path); ctx.setFillColor(colour); ctx.fillPath()
-    }
+    func fill(_ path: CGMutablePath) { ctx.addPath(path); ctx.setFillColor(white); ctx.fillPath() }
+
     /// Strokes a jointed limb one segment at a time, so it can taper from thigh to ankle. Round
-    /// caps do the work of joints — cheaper and steadier than modelling each limb as an outline.
+    /// caps do the work of joints — steadier than modelling each limb as an outline.
     func limb(_ joints: [CGPoint], _ widths: [Double]) {
         ctx.setStrokeColor(white)
         ctx.setLineCap(.round)
@@ -58,101 +62,62 @@ func render(into ctx: CGContext, scale: Double, dx: Double, dy: Double) {
         }
     }
 
+    /// Cuts a hole in what is already drawn — the only way to get a line *inside* a solid mark.
+    func carve(_ draw: () -> Void) {
+        ctx.saveGState()
+        ctx.setBlendMode(.clear)
+        draw()
+        ctx.restoreGState()
+    }
+
     ctx.translateBy(x: dx, y: dy)
-    ctx.rotate(by: -48 * .pi / 180)
+    ctx.rotate(by: -44 * .pi / 180)
     ctx.scaleBy(x: scale, y: scale)
 
-    // —— speed lines, trailing below and behind ————————————————
-    for (x, y, length, thickness) in [
-        (-250.0, 300.0, 210.0, 34.0), (-140.0, 170.0, 280.0, 34.0), (-360.0, 470.0, 150.0, 30.0),
-    ] {
-        let t = CGMutablePath()
-        t.addRoundedRect(
-            in: CGRect(x: x, y: y - length, width: thickness, height: length),
-            cornerWidth: thickness / 2, cornerHeight: thickness / 2)
-        fill(t, faint)
-    }
+    // —— the dress: narrow shoulders, bust, waist, then a skirt ——
+    let hemFront = p(140, 350), hemBack = p(-188, 300)
+    let body = CGMutablePath()
+    body.move(to: p(-60, 700))                                      // shoulder, back
+    body.addCurve(to: p(70, 708), control1: p(-24, 742), control2: p(34, 746))
+    body.addCurve(to: p(106, 612), control1: p(104, 690), control2: p(112, 650))  // the bust
+    body.addCurve(to: p(52, 496), control1: p(100, 566), control2: p(66, 534))    // the waist
+    body.addCurve(                                                  // skirt, front edge
+        to: hemFront, control1: p(94, 440), control2: p(hemFront.x - 12, hemFront.y + 70))
+    body.addCurve(                                                  // the hem, bowed outward
+        to: hemBack,
+        control1: p(70, hemFront.y - 76), control2: p(-96, hemBack.y - 74))
+    body.addCurve(                                                  // skirt, back edge
+        to: p(-54, 496),
+        control1: p(hemBack.x + 30, hemBack.y + 74), control2: p(-88, 424))
+    body.addCurve(to: p(-60, 700), control1: p(-58, 566), control2: p(-62, 636))
+    body.closeSubpath()
+    fill(body)
 
-    // —— legs, trailing below with air between them ————————————
-    limb([p(-46, 486), p(-92, 262), p(-142, 92), p(-208, 56)], [78, 56, 34])   // far leg
-    limb([p(40, 488), p(10, 252), p(-28, 62), p(-96, 20)], [84, 60, 36])       // near leg
+    // —— legs, trailing below the hem ————————————————————————————
+    // What settles the shape as a person in a skirt rather than an abstract wedge.
+    limb([p(26, 330), p(-16, 190), p(-58, 96)], [56, 34])
+    limb([p(-78, 318), p(-124, 196), p(-166, 116)], [50, 30])
 
-    // —— trailing arm, swept back along her side ————————————————
-    limb([p(-96, 640), p(-166, 540), p(-198, 458)], [50, 40])
-
-    // —— leading arm, reaching ahead ————————————————————————————
-    //    Drawn before the torso so the bust keeps a clean outline; the arm is one continuous
-    //    silhouette either way, and only the overlap order decides which contour survives.
-    limb([p(78, 672), p(130, 830), p(170, 962)], [50, 40])
-
-    // —— hair: a ponytail sweeping off the nape ————————————————
-    //    Its inner edge is an arc of the skull itself, so however the tail is shaped the hair can
-    //    never drift off the head — every freehand version either detached or read as a blade.
-    //    Both outer edges bow: a straight run between the nape and the tip reads as a cone.
-    let skull = p(10, 800), skullRadius = 70.0
-    func onSkull(_ degrees: Double) -> CGPoint {
-        let a = degrees * .pi / 180
-        return p(skull.x + skullRadius * cos(a), skull.y + skullRadius * sin(a))
-    }
-    let hair = CGMutablePath()
-    // The arc runs a little inside the skull so the two fills overlap; sharing an edge exactly
-    // leaves a hairline seam where the antialiasing of each meets.
-    hair.move(to: onSkull(150))
-    hair.addArc(
-        center: skull, radius: skullRadius - 8,
-        startAngle: 150 * .pi / 180, endAngle: 250 * .pi / 180, clockwise: false)
-    hair.addCurve(to: p(-192, 700), control1: p(-80, 700), control2: p(-152, 684))
-    hair.addCurve(to: p(-176, 758), control1: p(-210, 716), control2: p(-204, 746))
-    hair.addCurve(to: onSkull(150), control1: p(-128, 784), control2: p(-92, 818))
-    hair.closeSubpath()
-    fill(hair)
-
-    // —— skirt: an A-line reaching the knee ————————————————————
-    let skirt = CGMutablePath()
-    skirt.move(to: p(56, 496))                        // waist, front
-    skirt.addLine(to: p(-58, 496))                    // waist, back
-    skirt.addCurve(to: p(-218, 236), control1: p(-118, 408), control2: p(-176, 306))
-    skirt.addCurve(to: p(126, 282), control1: p(-96, 194), control2: p(38, 218))
-    skirt.addCurve(to: p(56, 496), control1: p(114, 376), control2: p(80, 436))
-    skirt.closeSubpath()
-    fill(skirt)
-
-    // —— torso: shoulders, bust, waist ————————————————————————
-    let torso = CGMutablePath()
-    torso.move(to: p(-56, 486))                       // waist, back
-    torso.addCurve(to: p(-112, 672), control1: p(-76, 560), control2: p(-104, 614))
-    torso.addCurve(to: p(100, 682), control1: p(-62, 712), control2: p(48, 714))  // shoulders
-    torso.addCurve(to: p(128, 608), control1: p(124, 668), control2: p(130, 642))
-    torso.addCurve(to: p(64, 546), control1: p(126, 574), control2: p(96, 550))   // the bust
-    torso.addCurve(to: p(58, 486), control1: p(60, 522), control2: p(58, 504))
-    torso.closeSubpath()
-    fill(torso)
-
-    // —— neck and head ————————————————————————————————————————
-    limb([p(-2, 656), p(8, 754)], [66])
+    // —— head, and the bun ————————————————————————————————————————
+    // One small circle overlapping the skull. It survives 32 px, where anything shaped like
+    // flowing hair turns into a smudge on the side of the head.
+    let skull = p(16, 826), skullRadius = 74.0
     ctx.setFillColor(white)
+    ctx.fillEllipse(in: CGRect(x: -92, y: 818, width: 62, height: 62))
     ctx.fillEllipse(
         in: CGRect(x: skull.x - skullRadius, y: skull.y - skullRadius,
                    width: skullRadius * 2, height: skullRadius * 2))
 
-    // —— the letter ————————————————————————————————————————————
-    ctx.saveGState()
-    ctx.translateBy(x: 178, y: 974)
-    ctx.rotate(by: -0.42)
-    let letter = CGMutablePath()
-    letter.addRoundedRect(
-        in: CGRect(x: -100, y: -48, width: 200, height: 142), cornerWidth: 18, cornerHeight: 18)
-    fill(letter)
-    // The flap is cut out rather than drawn, so it stays crisp at every size.
-    ctx.setBlendMode(.clear)
-    ctx.setLineWidth(17)
-    ctx.setLineJoin(.round)
-    ctx.setLineCap(.round)
-    ctx.move(to: p(-74, 72))
-    ctx.addLine(to: p(0, 14))
-    ctx.addLine(to: p(74, 72))
-    ctx.strokePath()
-    ctx.restoreGState()
+    // —— the arm, cut rather than drawn ——————————————————————————
+    // A thin line is all it needs to be: pressed along her side, in the line of the body.
+    carve {
+        ctx.setLineCap(.round)
+        ctx.setLineWidth(20)
+        ctx.setStrokeColor(white)
+        ctx.move(to: p(48, 688))
+        ctx.addCurve(to: p(72, 512), control1: p(78, 632), control2: p(80, 570))
+        ctx.strokePath()
+    }
 }
 
 /// The tight alpha bounding box of what was drawn, in canvas pixels (y measured from the top).
@@ -167,8 +132,8 @@ func bounds(of ctx: CGContext) -> (minX: Double, minY: Double, maxX: Double, max
     return (Double(minX), Double(minY), Double(maxX), Double(maxY))
 }
 
-// Pass one: draw small and centred, purely to measure. The probe has to fit inside the canvas
-// or the bounding box it reports is the canvas, not the figure.
+// Pass one: draw small and centred, purely to measure. The probe has to fit inside the canvas or
+// the bounding box it reports is the canvas, not the figure.
 let probeScale = 0.5, probeX = 512.0, probeY = 512.0
 let probe = newContext()
 render(into: probe, scale: probeScale, dx: probeX, dy: probeY)
@@ -180,13 +145,11 @@ precondition(
 let target = Double(size) - safeInset * 2
 let k = target / max(b.maxX - b.minX, b.maxY - b.minY)
 // The transform is translate → rotate → scale, so a local point lands at (dx, dy) + R·S·q.
-// Scaling by `k` about the translation origin therefore moves the measured centre by the same
-// factor, which is what lets the offset be solved for directly.
-let offsetX = (b.minX + b.maxX) / 2 - probeX
-let offsetY = (Double(size) - (b.minY + b.maxY) / 2) - probeY
+// Scaling by `k` about the translation origin moves the measured centre by the same factor, which
+// is what lets the offset be solved for directly.
 let scale = probeScale * k
-let dx = Double(size) / 2 - k * offsetX
-let dy = Double(size) / 2 - k * offsetY
+let dx = Double(size) / 2 - k * ((b.minX + b.maxX) / 2 - probeX)
+let dy = Double(size) / 2 - k * ((Double(size) - (b.minY + b.maxY) / 2) - probeY)
 
 let ctx = newContext()
 render(into: ctx, scale: scale, dx: dx, dy: dy)
