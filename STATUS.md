@@ -136,10 +136,11 @@ sends to httpbin and comes back 200, body and headers intact.
   A sandboxed app's open panel runs in another process that will not take synthesized keystrokes,
   and a drag cannot be synthesized here. Everything downstream of the URL the panel returns is
   tested, and the paste-a-curl path was driven end to end in the running app.
-- **This Mac's login keychain currently needs an authorization nobody can give**, so every test
-  that stores a secret skips (visible as "known issues" in the run). The tests say so rather than
-  failing, and rather than hanging — see `docs/decisions.md` D37. Secret storage itself is
-  unchanged and works on a Mac where the keychain answers.
+- The login keychain wedged partway through the final session — a `SecurityAgent` prompt nobody
+  could answer, which blocked `SecItem…` calls indefinitely. Killing that process cleared it, and
+  the full suite then ran with **no skips at all**. The guards added for it stay: a keychain that
+  will not answer now makes the affected tests skip rather than hang (`docs/decisions.md` D37,
+  D43), which is what you want on a CI runner.
 - The last Phase 11 acceptance clause — "a fresh Claude Code session … completes all three
   `SKILL.md` workflows without help" — **has not been tried**, because I cannot start an
   independent session. I ran the three workflows verbatim from the document myself instead, which
