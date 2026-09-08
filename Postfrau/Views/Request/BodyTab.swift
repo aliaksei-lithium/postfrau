@@ -260,7 +260,7 @@ struct FormDataEditor: View {
     private func valueEditor(_ field: FormField) -> some View {
         switch field.value {
         case .text:
-            TextField("Value", text: binding(field, \.textValue))
+            TextField("", text: binding(field, \.textValue))
                 .textFieldStyle(.plain)
                 .accessibilityLabel("Field value")
         case .file(let reference):

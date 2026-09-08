@@ -157,17 +157,66 @@ extension AppState {
     ///
     /// Built by running the real `RequestBuilder`, so the Headers tab can never drift from what
     /// actually goes on the wire. A request that cannot be built yet (no URL) simply has none.
-    func automaticHeaders(for tab: RequestTab) -> [HeaderField] {
-        let built = try? RequestBuilder().build(
-            tab.draft, resolver: resolver(for: tab), effectiveAuth: effectiveAuth(for: tab).auth)
-        return built?.automaticHeaders ?? []
-    }
+
 
     /// Everything that would go wrong with this request, for the Send button's tooltip.
     func warnings(for tab: RequestTab) -> [String] {
-        let built = try? RequestBuilder().build(
-            tab.draft, resolver: resolver(for: tab), effectiveAuth: effectiveAuth(for: tab).auth)
-        return built?.warnings ?? []
+        derivation(for: tab).warnings
+    }
+
+    func automaticHeaders(for tab: RequestTab) -> [HeaderField] {
+        derivation(for: tab).automaticHeaders
+    }
+
+    /// Everything the editor derives from a request, computed once per change rather than once
+    /// per redraw.
+    ///
+    /// These used to be three separate calls made from three view bodies, two of which ran the
+    /// *same* `RequestBuilder().build(…)` — about 5 ms of work on every evaluation, felt as lag
+    /// when switching between Params and Headers. They are now one build, cached against the
+    /// draft's generation and the variables' generation, so a click that changes neither costs a
+    /// dictionary lookup.
+    struct Derivation: Sendable {
+        var warnings: [String] = []
+        var automaticHeaders: [HeaderField] = []
+        var unresolved = UnresolvedCounts()
+        var signature = -1
+    }
+
+    func derivation(for tab: RequestTab) -> Derivation {
+        let signature = Self.signature(tab: tab, variables: variablesGeneration)
+        if let cached = derivationCache[tab.id], cached.signature == signature { return cached }
+
+        var derived = Derivation(signature: signature)
+        derived.unresolved = Self.countUnresolved(in: tab.draft, resolver: resolver(for: tab))
+
+        if let built = try? RequestBuilder().build(
+            tab.draft, resolver: resolver(for: tab), effectiveAuth: effectiveAuth(for: tab).auth) {
+            derived.warnings = built.warnings
+            derived.automaticHeaders = built.automaticHeaders
+            // This request is never sent, so the streaming body it may have written has to go —
+            // otherwise every redraw of a multipart request left a temporary file behind.
+            SecurityScopedFile.stopAccessing(built.accessedURLs)
+            if let temporary = built.payload.temporaryFileToClean {
+                try? FileManager.default.removeItem(at: temporary)
+            }
+        }
+
+        derivationCache[tab.id] = derived
+        // Bounded: tabs come and go, and a cache that only grows is a leak with extra steps.
+        if derivationCache.count > 64 {
+            let live = Set(tabs.map(\.id))
+            derivationCache = derivationCache.filter { live.contains($0.key) }
+        }
+        return derived
+    }
+
+    /// Cheap, and impossible to get stale: both halves are counters, not hashes of the content.
+    private static func signature(tab: RequestTab, variables: Int) -> Int {
+        var hasher = Hasher()
+        hasher.combine(tab.draftGeneration)
+        hasher.combine(variables)
+        return hasher.finalize()
     }
 }
 
@@ -243,7 +292,13 @@ extension AppState {
     }
 
     func unresolvedCounts(for tab: RequestTab) -> UnresolvedCounts {
-        let resolver = resolver(for: tab)
+        derivation(for: tab).unresolved
+    }
+
+    /// The counting itself, which `derivation` calls once per change.
+    static func countUnresolved(
+        in draft: RequestItem, resolver: VariableResolver
+    ) -> UnresolvedCounts {
         var counts = UnresolvedCounts()
         var seen: Set<String> = []
 
@@ -255,10 +310,10 @@ extension AppState {
             return found
         }
 
-        counts.url = count(tab.draft.url)
-        for row in tab.draft.params.active { counts.params += count(row.key) + count(row.value) }
-        for row in tab.draft.headers.active { counts.headers += count(row.key) + count(row.value) }
-        switch tab.draft.body {
+        counts.url = count(draft.url)
+        for row in draft.params.active { counts.params += count(row.key) + count(row.value) }
+        for row in draft.headers.active { counts.headers += count(row.key) + count(row.value) }
+        switch draft.body {
         case .raw(let text, _):
             counts.body = count(text)
         case .urlEncoded(let rows):

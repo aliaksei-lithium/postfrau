@@ -64,11 +64,23 @@ struct ResponseBodyView: View {
     }
 
     private var taskKey: String {
-        "\(response.finalURL)|\(response.byteCount)|\(pretty)|\(showingFullBody)"
+        "\(tab.id)|\(tab.responseGeneration)|\(pretty)|\(showingFullBody)"
     }
 
     private func load(content: ContentKind) async {
         guard content.isTextual else { return }
+
+        // The same response rendered the same way gives the same result, so switching back to a
+        // tab already seen costs a dictionary lookup rather than a re-read and a re-tokenize.
+        if let cached = state.renderedBody(for: taskKey) {
+            text = cached.text
+            tokens = cached.tokens
+            isTruncated = cached.truncated
+            prettyFailure = cached.prettyFailure
+            isLoading = false
+            return
+        }
+
         isLoading = true
         prettyFailure = nil
 
@@ -91,7 +103,15 @@ struct ResponseBodyView: View {
         let snapshot = prepared.text
         let computed = await Self.highlight(snapshot, content: content)
         // Guard against a newer load having replaced the text while this one was running.
-        if snapshot == text { tokens = computed }
+        guard snapshot == text else { return }
+        tokens = computed
+        state.cacheRenderedBody(
+            AppState.RenderedBody(
+                text: prepared.text,
+                tokens: computed,
+                truncated: prepared.truncated,
+                prettyFailure: prepared.prettyFailure),
+            for: taskKey)
     }
 
     /// Reads, decodes and optionally re-indents. Runs off the main actor.

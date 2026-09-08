@@ -9,7 +9,15 @@ An HTTP client for macOS 26. Collections are JSON files in a folder you choose �
 Download the DMG from [Releases](https://github.com/aliaksei-lithium/postfrau/releases) and drag
 Postfrau to Applications.
 
-The app is ad-hoc signed, so the first launch needs **right-click → Open** once.
+The app is ad-hoc signed, so macOS quarantines it. Either **right-click → Open** the first time,
+or clear the flag:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Postfrau.app
+```
+
+If macOS still refuses with *"Postfrau is damaged"*, that is the quarantine flag — the command
+above fixes it.
 
 ## Features
 
@@ -71,9 +79,9 @@ Set `CODESIGN_IDENTITY` to sign with a Developer ID, `NOTARY_PROFILE` to notariz
 | Secrets | login Keychain | only with iCloud Keychain on |
 | History, settings, window state | app container | never |
 
-## Not included
+## Not Supported
 
-No scripting, test assertions, mock server, team sync, WebSocket or gRPC. See `PLAN.md` §9.
+No scripting, test assertions, mock server, team sync, WebSocket or gRPC.
 
 ## Licence
 

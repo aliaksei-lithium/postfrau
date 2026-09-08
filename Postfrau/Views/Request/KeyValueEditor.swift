@@ -72,21 +72,23 @@ struct KeyValueEditor: View {
                         ? "Enable this row" : "Enable \(row.wrappedValue.key)")
                 .onChange(of: row.wrappedValue.enabled) { commit() }
 
+            // No placeholder: the column header above already says "Parameter" or "Header", and
+            // repeating it in every empty cell reads as a wall of the same word.
             SuggestingTextField(
-                text: row.key, prompt: keyPrompt, suggestions: keySuggestions, onCommit: commit)
+                text: row.key, prompt: "", suggestions: keySuggestions, onCommit: commit)
             .frame(maxWidth: .infinity)
             .accessibilityLabel("\(keyPrompt) name")
             .onChange(of: row.wrappedValue.key) { commit() }
 
             SuggestingTextField(
-                text: row.value, prompt: valuePrompt,
+                text: row.value, prompt: "",
                 suggestions: { valueSuggestions(row.wrappedValue.key, $0) }, onCommit: commit)
             .frame(maxWidth: .infinity)
             .accessibilityLabel("\(keyPrompt) value")
             .onChange(of: row.wrappedValue.value) { commit() }
 
             if showsDescription {
-                TextField("Description", text: Binding(
+                TextField("", text: Binding(
                     get: { row.wrappedValue.description ?? "" },
                     set: { row.wrappedValue.description = $0.isEmpty ? nil : $0 }))
                 .textFieldStyle(.plain)

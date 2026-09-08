@@ -24,7 +24,10 @@ struct EnvironmentPicker: View {
             Button {
                 showingQuickLook.toggle()
             } label: {
-                Image(systemName: "eye")
+                // A stack, because that is what the popover shows: environment over folder over
+                // collection over globals, with the winning value on top.
+                Image(systemName: "square.3.layers.3d")
+                    .imageScale(.small)
             }
             .help("Show the variables this request will see")
             .accessibilityLabel("Show resolved variables")

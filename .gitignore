@@ -25,3 +25,6 @@ dist/
 
 # macOS
 .DS_Store
+
+# The build plan is a working document, kept locally.
+PLAN.md

@@ -8,6 +8,8 @@ struct DataSettings: View {
     /// A folder the user picked that already holds a workspace: the sheet asks what to do with it.
     @State private var pendingFolder: URL?
     @State private var isRelocating = false
+    /// Asked once rather than on every redraw of the window.
+    @State private var iCloudDrive: URL?
 
     var body: some View {
         Form {
@@ -39,7 +41,7 @@ struct DataSettings: View {
                 // "Use iCloud Driv…" is not a label anyone can act on.
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
-                        if FileDialogs.iCloudDriveRoot != nil {
+                        if iCloudDrive != nil {
                             Button("Use iCloud Drive…") { choose(startingAtICloud: true) }
                         }
                         Button("Choose Folder…") { choose(startingAtICloud: false) }
@@ -83,6 +85,7 @@ struct DataSettings: View {
             }
         }
         .formStyle(.grouped)
+        .task { iCloudDrive = FileDialogs.iCloudDriveRoot }
         .sheet(item: $pendingFolder) { folder in
             RelocationSheet(folder: folder) { choice in
                 pendingFolder = nil
@@ -108,7 +111,7 @@ struct DataSettings: View {
                 ? "Choose or create a folder in iCloud Drive for Postfrau to keep its collections in."
                 : "Choose a folder for Postfrau to keep its collections in.",
             suggestedName: "Postfrau",
-            startingAt: startingAtICloud ? FileDialogs.iCloudDriveRoot : nil)
+            startingAt: startingAtICloud ? iCloudDrive : nil)
         guard let picked else { return }
 
         Task {

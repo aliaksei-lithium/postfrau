@@ -59,7 +59,7 @@ struct VariablesEditor: View {
                 .accessibilityLabel("Enable \(value.key.isEmpty ? "this variable" : value.key)")
                 .onChange(of: variable.wrappedValue.enabled) { commit() }
 
-            TextField("Variable", text: variable.key)
+            TextField("", text: variable.key)
                 .textFieldStyle(.plain)
                 .frame(maxWidth: .infinity)
                 .accessibilityLabel("Variable name")
@@ -70,7 +70,7 @@ struct VariablesEditor: View {
                     SecureField("Value", text: variable.value)
                         .textFieldStyle(.plain)
                 } else {
-                    TextField("Value", text: variable.value)
+                    TextField("", text: variable.value)
                         .textFieldStyle(.plain)
                 }
                 if value.isSecret {

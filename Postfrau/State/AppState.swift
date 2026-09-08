@@ -82,6 +82,35 @@ final class AppState {
     @ObservationIgnored var securityScopedRoot: URL?
     @ObservationIgnored var folderWatcher: FolderWatcher?
     @ObservationIgnored var syncTask: Task<Void, Never>?
+    /// Per-tab derived values, keyed by the draft and variables generations. See `derivation`.
+    @ObservationIgnored var derivationCache: [UUID: Derivation] = [:]
+
+    /// Rendered response bodies, so switching Pretty ↔ Raw does not redo the work.
+    ///
+    /// Reading a body off disk, decoding it, re-indenting and tokenizing is the same result every
+    /// time for the same response — but it was repeated on every switch between the two tabs,
+    /// which is exactly the click a person makes most.
+    struct RenderedBody: Sendable {
+        var text: String
+        var tokens: [SyntaxToken]
+        var truncated: Bool
+        var prettyFailure: String?
+    }
+
+    @ObservationIgnored private var renderedBodies: [String: RenderedBody] = [:]
+    @ObservationIgnored private var renderedBodyOrder: [String] = []
+
+    func renderedBody(for key: String) -> RenderedBody? { renderedBodies[key] }
+
+    func cacheRenderedBody(_ body: RenderedBody, for key: String) {
+        if renderedBodies[key] == nil { renderedBodyOrder.append(key) }
+        renderedBodies[key] = body
+        // A handful of megabyte strings is plenty to keep; beyond that the oldest goes.
+        while renderedBodyOrder.count > 8 {
+            renderedBodies.removeValue(forKey: renderedBodyOrder.removeFirst())
+        }
+    }
+
     /// Polls for a data folder that went away, since a dead directory sends no more events.
     @ObservationIgnored var folderRecoveryTask: Task<Void, Never>?
     /// Which sends the History sidebar shows. Not persisted: a filter that survives a relaunch
@@ -378,7 +407,17 @@ final class AppState {
         touchUpdatedAt(collection: id)
         dirtyCollectionIDs.insert(id)
         invalidateSidebarCache()
+        // A collection carries variables and auth that requests inherit.
+        invalidateVariables()
     }
+
+    /// Bumped whenever anything a variable could resolve from changes.
+    ///
+    /// Keyed on by the per-tab derivation cache, so a request's badges and computed headers are
+    /// recomputed when an environment changes but not on every redraw.
+    private(set) var variablesGeneration = 0
+
+    func invalidateVariables() { variablesGeneration &+= 1 }
 
     /// Tells the sidebar its memoized tree snapshot is out of date.
     ///
@@ -389,6 +428,7 @@ final class AppState {
 
     func markDirty(environment id: UUID) {
         dirtyEnvironmentIDs.insert(id)
+        invalidateVariables()
     }
 
     /// True when this collection has an edit queued that has not reached the disk.
@@ -398,7 +438,10 @@ final class AppState {
     /// over their own, which must not then be written back on the next autosave.
     func clearDirty(collection id: UUID) { dirtyCollectionIDs.remove(id) }
 
-    func markGlobalsDirty() { globalsDirty = true }
+    func markGlobalsDirty() {
+        globalsDirty = true
+        invalidateVariables()
+    }
     func markSettingsDirty() { settingsDirty = true }
     func markUIStateDirty() { uiStateDirty = true }
 

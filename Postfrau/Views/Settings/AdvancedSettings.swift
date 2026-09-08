@@ -7,12 +7,18 @@ struct AdvancedSettings: View {
 
     @State private var installMessage: String?
     @State private var installFailed = false
+    /// Where the tool is installed, and whether the bundle carries one.
+    ///
+    /// Held in state rather than asked of the filesystem inside `body`: every toggle elsewhere in
+    /// this window re-evaluates it, and four `stat` calls per redraw is four too many.
+    @State private var installedPath: String?
+    @State private var hasBundledTool = false
 
     var body: some View {
         Form {
             Section {
                 LabeledContent("Status") {
-                    if let path = CommandLineTool.installedPath {
+                    if let path = installedPath {
                         Label(path.replacingOccurrences(of: NSHomeDirectory(), with: "~"),
                               systemImage: "checkmark.circle")
                         .foregroundStyle(.secondary)
@@ -22,8 +28,8 @@ struct AdvancedSettings: View {
                 }
                 HStack {
                     Button("Install Command Line Tool…") { install() }
-                        .disabled(CommandLineTool.bundledBinary == nil)
-                    if CommandLineTool.installedPath != nil {
+                        .disabled(!hasBundledTool)
+                    if installedPath != nil {
                         Button("Remove") { remove() }
                     }
                     Spacer()
@@ -56,6 +62,12 @@ struct AdvancedSettings: View {
             }
         }
         .formStyle(.grouped)
+        .task { refreshInstallState() }
+    }
+
+    private func refreshInstallState() {
+        installedPath = CommandLineTool.installedPath
+        hasBundledTool = CommandLineTool.bundledBinary != nil
     }
 
     private func install() {
@@ -75,6 +87,7 @@ struct AdvancedSettings: View {
         do {
             let path = try CommandLineTool.link(source, into: directory)
             installFailed = false
+            refreshInstallState()
             installMessage = "Linked \(path). "
                 + (CommandLineTool.isOnPath(directory)
                    ? "Run `postfrau help` to check it."
@@ -89,6 +102,7 @@ struct AdvancedSettings: View {
         do {
             try CommandLineTool.unlink()
             installFailed = false
+            refreshInstallState()
             installMessage = "Removed."
         } catch {
             installFailed = true

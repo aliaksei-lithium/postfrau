@@ -49,7 +49,14 @@ final class RequestTab: Identifiable {
     /// The request this tab edits, when it is saved in a collection.
     var requestID: UUID?
     var collectionID: UUID?
-    var draft: RequestItem
+    /// Bumped on every change to the draft, however it was made.
+    ///
+    /// `didSet` on a value-typed property fires for mutations *through* it — including
+    /// `tab.draft.headers.append(…)` from a SwiftUI binding — so nothing can change the draft
+    /// without this noticing. That is what makes it safe to key a cache on.
+    @ObservationIgnored private(set) var draftGeneration = 0
+
+    var draft: RequestItem { didSet { draftGeneration &+= 1 } }
     /// The last state that was saved (or loaded). `nil` only while a tab is being constructed.
     var savedSnapshot: RequestItem
     /// True for tabs opened from history: they have no home in a collection.
@@ -61,7 +68,12 @@ final class RequestTab: Identifiable {
     /// has been read. The recording is not duplicated into the UI state — history already has it.
     @ObservationIgnored var restoredHistoryEntryID: UUID?
 
-    var response: HTTPResponse?
+    /// Bumped whenever a response arrives or is cleared, so anything cached against a response
+    /// cannot be handed the previous one. Two sends to the same URL can return the same number of
+    /// bytes and different content.
+    @ObservationIgnored private(set) var responseGeneration = 0
+
+    var response: HTTPResponse? { didSet { responseGeneration &+= 1 } }
     var errorMessage: String?
     var warnings: [String] = []
     var isSending = false
