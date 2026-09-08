@@ -105,7 +105,11 @@ struct CollectionRow: View {
             .accessibilityElement(children: isRenaming ? .contain : .ignore)
             .accessibilityLabel("Collection \(collection.name)\(syncDescription)")
             .contentShape(.rect)
-            .onTapGesture(count: 2) { state.openCollectionEditor(collection.id) }
+            // `simultaneousGesture`, not `onTapGesture`: a plain tap gesture on a `List` row
+            // consumes the click before the list's own selection gesture sees it, and the
+            // selection highlight stops following what you click.
+            .simultaneousGesture(
+                TapGesture(count: 2).onEnded { state.openCollectionEditor(collection.id) })
             .contextMenu { menu }
             .dropDestination(for: DraggedItem.self) { items, _ in
                 return state.handleDrop(items, collectionID: collection.id, parentID: nil)
@@ -207,7 +211,8 @@ struct FolderRow: View {
             .accessibilityElement(children: isRenaming ? .contain : .ignore)
             .accessibilityLabel("Folder \(folder.name)")
             .contentShape(.rect)
-            .onTapGesture(count: 2) { state.openFolderEditor(folder.id, in: collectionID) }
+            .simultaneousGesture(
+                TapGesture(count: 2).onEnded { state.openFolderEditor(folder.id, in: collectionID) })
             .contextMenu {
                 Button("New Request") { state.newRequest(in: collectionID, parentID: folder.id) }
                 Button("New Folder") { state.newFolder(in: collectionID, parentID: folder.id) }
@@ -272,7 +277,7 @@ struct RequestRow: View {
         .accessibilityLabel("\(request.method.rawValue) \(request.name)")
         .accessibilityAddTraits(.isButton)
         .contentShape(.rect)
-        .onTapGesture(count: 2) { state.openRequest(id: request.id) }
+        .simultaneousGesture(TapGesture(count: 2).onEnded { state.openRequest(id: request.id) })
         .contextMenu {
             Button("Open") { state.openRequest(id: request.id) }
             Button("Rename…") { beginRename() }

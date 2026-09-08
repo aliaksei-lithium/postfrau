@@ -12,19 +12,12 @@ struct MainWindow: View {
         NavigationSplitView {
             SidebarView()
         } detail: {
-            VStack(spacing: 0) {
-                TabBar()
-                SyncBanners()
-                if let tab = state.selectedTab {
-                    detail(for: tab, state: state)
-                } else {
-                    CenteredMessage(
-                        symbol: "square.on.square", title: "No open request",
-                        message: "Press ⌘T to open a tab.")
-                }
-                StatusBar()
-            }
-            .navigationSplitViewColumnWidth(min: 520, ideal: 900)
+            // A separate view, and not for tidiness: `MainWindow`'s body owns the toolbar, the
+            // sheets and the split itself, so anything it reads re-creates all of that when it
+            // changes. Reading `selectedTab` here meant every tab switch rebuilt the window
+            // chrome — about half of the ~120 ms a switch cost. See `docs/decisions.md` D50.
+            DetailPane(urlFieldFocused: $urlFieldFocused)
+                .navigationSplitViewColumnWidth(min: 520, ideal: 900)
         }
         .sheet(item: $state.importReport) { report in
             ImportReportSheet(report: report) { state.importReport = nil }
@@ -40,7 +33,6 @@ struct MainWindow: View {
                         .padding(12)
                 }
         }
-        .navigationTitle(state.selectedTab?.title ?? "Postfrau")
         .toolbar {
             ToolbarSpacer(.flexible)
             ToolbarItem {
@@ -80,6 +72,34 @@ struct MainWindow: View {
         }
     }
 
+    /// Bumped by the ⌘L menu command to move focus into the URL field.
+    private var urlFocusRequest: Int { state.urlFocusRequests }
+}
+
+/// The detail column: tab bar, the selected request, status bar.
+///
+/// Split out of `MainWindow` so that switching tabs invalidates only this, and not the window's
+/// toolbar, sheets and dialogs along with it.
+private struct DetailPane: View {
+    @Environment(AppState.self) private var state
+    @FocusState.Binding var urlFieldFocused: Bool
+
+    var body: some View {
+        VStack(spacing: 0) {
+            TabBar()
+            SyncBanners()
+            if let tab = state.selectedTab {
+                detail(for: tab, state: state)
+            } else {
+                CenteredMessage(
+                    symbol: "square.on.square", title: "No open request",
+                    message: "Press ⌘T to open a tab.")
+            }
+            StatusBar()
+        }
+        .navigationTitle(state.selectedTab?.title ?? "Postfrau")
+    }
+
     @ViewBuilder
     private func detail(for tab: RequestTab, state: AppState) -> some View {
         switch tab.kind {
@@ -109,7 +129,4 @@ struct MainWindow: View {
             ResponsePane(tab: tab)
         }
     }
-
-    /// Bumped by the ⌘L menu command to move focus into the URL field.
-    private var urlFocusRequest: Int { state.urlFocusRequests }
 }

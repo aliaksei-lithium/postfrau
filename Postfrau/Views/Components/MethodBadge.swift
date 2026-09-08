@@ -28,13 +28,26 @@ extension HTTPMethod {
 
 /// The small method label used in the sidebar, tab bar and history rows.
 struct MethodBadge: View {
+    /// `.increased` inside a selected row, where the background is the accent colour.
+    @Environment(\.backgroundProminence) private var backgroundProminence
+
     var method: HTTPMethod
     var size: Double = 10
+    /// Set by the places that draw their own selection fill rather than letting a `List` do it.
+    var isOnAccent = false
+
+    /// A method tint on top of an accent-filled row is unreadable — orange on blue worst of all,
+    /// and blue on blue invisible. macOS's answer is to drop the colour on a selected row and let
+    /// the row's own foreground carry it, which is what `.primary` resolves to there.
+    private var style: AnyShapeStyle {
+        backgroundProminence == .increased || isOnAccent
+            ? AnyShapeStyle(.primary) : AnyShapeStyle(method.tint)
+    }
 
     var body: some View {
         Text(method.badgeText)
             .font(.system(size: size, weight: .bold, design: .rounded))
-            .foregroundStyle(method.tint)
+            .foregroundStyle(style)
             .monospacedDigit()
             .frame(minWidth: size * 3.2, alignment: .leading)
             .accessibilityLabel("\(method.rawValue) request")

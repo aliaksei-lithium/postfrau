@@ -755,3 +755,39 @@ point, and the skill says so.
 **Agents name themselves.** `--as` was documented as `--as claude` throughout, which is wrong for
 every agent that is not Claude — the whole value of the field is telling one tool's sends from
 another's in the history. The skill now asks for the name of the tool the agent is running inside.
+
+## D50 — Clicking a request did nothing, and switching tabs rebuilt the window
+
+Three separate reports, three different causes. Worth separating, because two of them were not
+performance problems at all.
+
+**The sidebar selection never moved.** `RequestRow` carried `.onTapGesture(count: 2)` to open a
+request. A plain tap gesture on a `List` row consumes the click before the list's own selection
+gesture sees it, so the highlight stayed where it was and single clicks appeared to do nothing —
+which reads exactly like lag. `simultaneousGesture(TapGesture(count: 2))` lets both run.
+Measured after the fix, moving the selection costs ~8 ms, the same as clicking dead space.
+
+**Orange on blue.** `MethodBadge` always drew its method tint, including on a selected row where
+the background is the accent colour. POST in orange on blue is unreadable and PUT in blue on blue
+is invisible. It now reads `backgroundProminence`, which SwiftUI sets to `.increased` inside a
+selected row, and falls back to `.primary` there — which is what every other piece of text in a
+selected row already does.
+
+**Switching tabs cost ~120 ms**, and that one was real. `MainWindow.body` read
+`state.selectedTab`, so every tab switch invalidated the view that owns the toolbar, the sheets,
+the confirmation dialog and the split — about half the cost. Moving the detail column into its own
+`DetailPane` view, which reads `selectedTab` itself, took a switch to ~99 ms.
+
+**An attempt that made it worse, kept here so it is not tried again.** Keeping the last three
+tabs built in a `ZStack` and toggling visibility — the same trick that fixed section switching in
+D46 — took a switch from 99 ms to **107 ms**. Hidden sections inside one editor are nearly free;
+hidden *editors* are not, because each one still takes part in every layout pass. The trick works
+where the alternative is rebuilding an AppKit-backed subtree, not where it multiplies the number
+of subtrees being laid out.
+
+**What is left.** ~99 ms a switch, of which roughly 60 is building the request editor for the
+newly selected tab and the rest is the shell. It is spread across SwiftUI layout rather than
+sitting in any one place: the URL bar accounts for 5 ms, the response pane for 8, and no single
+frame of ours exceeds a few per cent. Reducing it further means making the params table cheaper to
+build — fewer AppKit-backed text fields per row, or genuinely lazy rows — which is a bigger change
+than this one and wants its own measurement.
