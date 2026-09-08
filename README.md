@@ -6,11 +6,8 @@ An HTTP client for macOS 26. Collections are JSON files in a folder you choose â
 
 ## Install
 
-Download the DMG from [Releases](https://github.com/aliaksei-lithium/postfrau/releases), or:
-
-```bash
-brew install --cask aliaksei-lithium/postfrau/postfrau
-```
+Download the DMG from [Releases](https://github.com/aliaksei-lithium/postfrau/releases) and drag
+Postfrau to Applications.
 
 The app is ad-hoc signed, so the first launch needs **right-click â†’ Open** once.
 
