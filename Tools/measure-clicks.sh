@@ -6,6 +6,10 @@
 # Screen coordinates, origin top-left; the two points are clicked alternately. Prints the share of
 # main-thread samples that were *not* idle. Postfrau must already be running and frontmost.
 #
+# This measures CPU *busy* time, which is NOT click-to-paint latency. A click that is merely
+# being waited on burns no CPU and is invisible here. For responsiveness use
+# `Tools/measure-latency.sh`; use this one only to ask whether the main thread is burning.
+#
 # Why this rather than Instruments: Instruments needs a UI this environment cannot drive (see
 # `docs/decisions.md` D40), while `sample` works headlessly and is enough to separate "blocked",
 # "idle" and "burning the main thread".

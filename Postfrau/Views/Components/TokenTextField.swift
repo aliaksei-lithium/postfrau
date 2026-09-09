@@ -68,8 +68,8 @@ struct TokenTextField: NSViewRepresentable {
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         guard let textView = scrollView.documentView as? TokenTextViewCore else { return }
         context.coordinator.parent = self
+        // `apply` measures at the end; measuring again here laid the text out twice per update.
         context.coordinator.apply(self, to: textView, initial: false)
-        context.coordinator.reportHeight(of: textView)
     }
 
     @MainActor
@@ -78,6 +78,23 @@ struct TokenTextField: NSViewRepresentable {
         private var displayedText: String?
         /// The last height handed back, so an unchanged one does not churn the layout.
         private var lastReportedHeight: Double = 0
+        /// The text and tokens last written into the storage, so an unchanged update can skip it.
+        private var lastHighlight: (text: String, fontSize: Double, tokens: [VariableToken])?
+
+        /// `defaultLineHeight(for:)` needs a layout manager, and building one per measurement is
+        /// an AppKit allocation on a path that runs on every tab switch. It depends only on the
+        /// font, so it is worth remembering.
+        ///
+        /// The layout manager is a throwaway rather than the text view's own: reading
+        /// `layoutManager` on an `NSTextView` silently downgrades it to TextKit 1.
+        private static var lineHeights: [Double: Double] = [:]
+        static func lineHeight(forFontSize size: Double) -> Double {
+            if let known = lineHeights[size] { return known }
+            let font = NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
+            let height = NSLayoutManager().defaultLineHeight(for: font)
+            lineHeights[size] = height
+            return height
+        }
         /// Tokens for the text currently on screen, used for hover tooltips.
         private(set) var tokens: [VariableToken] = []
         private(set) var currentText = ""
@@ -119,10 +136,7 @@ struct TokenTextField: NSViewRepresentable {
 
             // `defaultLineHeight(for:)` is the height the text is actually laid out at.
             // `boundingRectForFont` is larger — using it made a four-line cap render as six.
-            // The throwaway layout manager is not the text view's, so this does not drag it back
-            // to TextKit 1.
-            let font = NSFont.monospacedSystemFont(ofSize: parent.fontSize, weight: .regular)
-            let line = NSLayoutManager().defaultLineHeight(for: font)
+            let line = Coordinator.lineHeight(forFontSize: parent.fontSize)
             let inset = textView.textContainerInset.height * 2
             let used = layout.usageBoundsForTextContainer.height
             // One line at least, `maximumLines` at most; past that the scroll view takes over.
@@ -143,6 +157,14 @@ struct TokenTextField: NSViewRepresentable {
             let text = textView.string
             currentText = text
             tokens = config.resolver.tokens(in: text)
+
+            // Rewriting the storage invalidates the layout, so a tab switch that lands on the
+            // same URL — or any unrelated update — would re-lay-out the field for nothing.
+            if let last = lastHighlight,
+               last.text == text, last.fontSize == config.fontSize, last.tokens == tokens {
+                return
+            }
+            lastHighlight = (text, config.fontSize, tokens)
 
             let full = NSRange(location: 0, length: (text as NSString).length)
             storage.beginEditing()

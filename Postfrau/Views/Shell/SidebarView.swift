@@ -34,6 +34,7 @@ struct SidebarView: View {
                 }
             }
             .listStyle(.sidebar)
+            .onChange(of: state.sidebarSelection) { ClickProbe.marked("select") }
             // Dropping a file on the sidebar is the other obvious way to import one.
             .dropDestination(for: URL.self) { urls, _ in
                 guard let url = urls.first else { return false }

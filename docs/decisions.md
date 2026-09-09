@@ -863,3 +863,64 @@ on the same view, not about the modifier existing.
 wait. Ruled out by measurement: the tab strip's background double-tap (neutral), and the
 `scrollTo` on selection change (neutral). The sidebar, which does the same amount of work, paints
 in 27 ms — so the wait is specific to the tab path.
+
+## D53 — What is left of the click latency is AppKit controls, not a wait
+
+D52 removed a 400 ms timer and left tabs at "134 ms, ~80 ms of it an unexplained wait". That
+framing was wrong, and it was wrong because the number came from a harness that walked the
+accessibility tree between clicks — forcing SwiftUI to rebuild accessibility nodes it would
+otherwise never have built, and charging it to the app.
+
+Measured properly, with `NSEvent.timestamp` against `systemUptime` for the wait and a
+last-in-line `beforeWaiting` run-loop observer for the repaint (`Postfrau/Support/ClickProbe.swift`,
+driven by `Tools/measure-latency.sh`):
+
+| | held (waiting) | paint (work) |
+|---|---|---|
+| sidebar row | ~1 ms | ~15 ms |
+| tab | ~1 ms | ~59 ms |
+
+**There is no wait left.** Both paths reach their handler in about a millisecond. Everything
+remaining is work, which means a profiler can attribute it — and the SwiftUI instrument does.
+
+**Switching tabs is not a runaway rebuild.** Exactly five view bodies run: `RequestEditor`,
+`URLBar`, `KeyValueEditor`, two `TabItem`s, and twelve `SuggestingTextField`s. `makeNSView` is
+never called, so the AppKit views are reused, not recreated. The cost is *updating* them.
+
+Subtracting one piece at a time from a 59 ms switch:
+
+| removed | saves |
+|---|---|
+| the twelve editable cells (`Text` instead of `TextField`) | 15.8 ms |
+| the rest of the key/value rows | 19 ms |
+| the URL bar | 8.7 ms |
+| the editor's segmented picker | 3.7 ms |
+| the response pane | 2.1 ms |
+
+Every entry is an AppKit-backed control being re-driven. Measured and found to change nothing:
+keying rows by position rather than id, fixed column widths instead of `maxWidth: .infinity`,
+`SuggestingTextField`'s five `onKeyPress` modifiers and its completion overlay, the per-row
+`onKeyPress`, `navigationTitle`, and the status bar.
+
+**Taken:** the delete button is built only for the hovered row rather than for every row at
+`opacity(0)`, with the row carrying an `accessibilityAction` so VoiceOver keeps the affordance;
+`Toggle(.checkbox)` — an `NSButton` per row — becomes a drawn SwiftUI button that looks the same;
+`TokenTextField` stops laying the text out twice per update, caches the font metric instead of
+building an `NSLayoutManager` per measurement, and skips the attributed rewrite when neither text
+nor tokens changed. **Tabs 58 → 47 ms**, same pair of tabs, three runs of twelve clicks either side. The
+sidebar was already ~16 ms and is untouched.
+
+**Not taken, and why it is the only large win left.** The remaining 15.8 ms is twelve live
+`TextField`s, ~1.3 ms each. Rendering a cell as `Text` until it is focused would recover it, but
+it breaks tabbing between cells and makes the first click place the caret somewhere arbitrary —
+too much to spend on a table you fill in by keyboard. It needs the user's call, not a quiet
+decision here.
+
+**Method note.** `Tools/measure-clicks.sh` measures CPU busy time and cannot see a wait;
+`Tools/measure-latency.sh` measures wall clock and can. Both are in the tree, and the first now
+says which question it answers. Two further traps, both of which produced wrong numbers here
+before they were caught: a harness that reads the accessibility tree changes what it measures,
+re-clicking an already-selected tab costs ~1 ms and will quietly halve a median, and the cost of
+a switch depends on which request is in the tab — so a before/after has to name the same pair
+rather than let the harness pick, which is what `Tools/measure-latency.sh`'s optional target
+arguments are for.

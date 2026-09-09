@@ -102,6 +102,7 @@ struct TabItem: View {
         // gesture with a single one makes SwiftUI hold the single action for the full
         // double-click interval — ~400 ms — before selecting. See `docs/decisions.md` D52.
         .onTapGesture {
+            ClickProbe.marked("tab")
             if NSApp.currentEvent?.clickCount == 2 {
                 beginRename()
             } else {

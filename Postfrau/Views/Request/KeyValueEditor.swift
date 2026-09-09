@@ -60,17 +60,27 @@ struct KeyValueEditor: View {
         let isBlank = row.wrappedValue.isEmpty
 
         return HStack(spacing: 8) {
-            Toggle("", isOn: row.enabled)
-                .labelsHidden()
-                .toggleStyle(.checkbox)
-                .frame(width: 18)
-                // The blank row has nothing to enable yet.
-                .disabled(isBlank)
-                .opacity(isBlank ? 0.35 : 1)
-                .accessibilityLabel(
-                    row.wrappedValue.key.isEmpty
-                        ? "Enable this row" : "Enable \(row.wrappedValue.key)")
-                .onChange(of: row.wrappedValue.enabled) { commit() }
+            // Drawn rather than `Toggle(.checkbox)`. That style is an `NSButton`, and a table of
+            // them is re-driven through AppKit on every tab switch — four of them cost 8 ms of
+            // the switch. This is a plain SwiftUI button that looks the same.
+            Button {
+                row.enabled.wrappedValue.toggle()
+                commit()
+            } label: {
+                Image(systemName: row.wrappedValue.enabled ? "checkmark.square.fill" : "square")
+                    .font(.system(size: 13))
+                    .foregroundStyle(
+                        row.wrappedValue.enabled ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+            }
+            .buttonStyle(.plain)
+            .frame(width: 18)
+            // The blank row has nothing to enable yet.
+            .disabled(isBlank)
+            .opacity(isBlank ? 0.35 : 1)
+            .accessibilityLabel(
+                row.wrappedValue.key.isEmpty
+                    ? "Enable this row" : "Enable \(row.wrappedValue.key)")
+            .accessibilityAddTraits(row.wrappedValue.enabled ? [.isToggle, .isSelected] : .isToggle)
 
             // No placeholder: the column header above already says "Parameter" or "Header", and
             // repeating it in every empty cell reads as a wall of the same word.
@@ -97,24 +107,35 @@ struct KeyValueEditor: View {
                 .onChange(of: row.wrappedValue.description) { commit() }
             }
 
-            Button {
-                delete(row.wrappedValue.id)
-            } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .foregroundStyle(.tertiary)
+            // Built only for the row under the pointer. As `.opacity(0)` on every row this was
+            // a live button per row, constructed and laid out on every rebuild — and the table
+            // is rebuilt on every tab switch. The `Spacer` keeps the column width steady.
+            if hoveredRow == row.wrappedValue.id && !isBlank {
+                Button {
+                    delete(row.wrappedValue.id)
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+                .frame(width: 20)
+                .help("Delete this row")
+                .accessibilityLabel("Delete \(row.wrappedValue.key)")
+            } else {
+                Spacer().frame(width: 20)
             }
-            .buttonStyle(.plain)
-            .frame(width: 20)
-            .opacity(hoveredRow == row.wrappedValue.id && !isBlank ? 1 : 0)
-            .disabled(isBlank)
-            .help("Delete this row")
-            .accessibilityLabel("Delete \(row.wrappedValue.key)")
         }
         .font(.callout)
         .padding(.horizontal, 12)
         .padding(.vertical, 5)
         .opacity(row.wrappedValue.enabled || isBlank ? 1 : 0.5)
         .onHover { hoveredRow = $0 ? row.wrappedValue.id : nil }
+        // The delete button above exists only while the pointer is on the row, so the row itself
+        // carries the action — otherwise VoiceOver, which never hovers, could not reach it.
+        .accessibilityAction(named: "Delete this row") {
+            guard !isBlank else { return }
+            delete(row.wrappedValue.id)
+        }
         // ⌘⌫ removes the row the cursor is in, matching the shortcut in §5.
         .onKeyPress(keys: [.delete], phases: .down) { press in
             guard press.modifiers.contains(.command), !isBlank else { return .ignored }
