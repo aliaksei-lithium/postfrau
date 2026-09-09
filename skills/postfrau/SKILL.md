@@ -1,254 +1,170 @@
 ---
 name: postfrau
 description: >
-  Inspect and edit HTTP request collections, send requests, import an OpenAPI or Postman
-  specification, and read the history of what was sent, using the `postfrau` command line tool.
-  Use this whenever the user mentions postfrau, an API collection, an OpenAPI or Swagger spec,
-  running or sending a saved request, or asks to try an HTTP endpoint and keep it for later.
+  Send and inspect HTTP requests from saved collections with the `postfrau` command line tool:
+  find a request by description, run it against an environment, fill its variables, read the
+  response, and edit or import collections. Use whenever the user mentions postfrau, an API
+  collection, an OpenAPI or Swagger spec, running or sending a saved request, or asks to call an
+  endpoint in a named environment.
 ---
 
 # postfrau
 
-`postfrau` is the command line half of Postfrau, a macOS HTTP client. It reads and writes the
-same collections the app shows, and everything it sends appears in the app's history attributed
-to you.
+The command line half of Postfrau, a macOS HTTP client. Same collections the app shows; every
+send lands in the app's history, attributed.
 
-Run `postfrau --help`, or `postfrau <command> --help`, for the full flag list. This file covers
-what you need to work without further help.
+## Start here
 
-## Ground rules
+A request like *"get the deposit response in prod_deu for deposit FDA_11!_222"* maps onto three
+commands. Never guess a path — find it.
 
-- **Say who you are, by your own name.** Pass `--as <your name>` — `--as cursor` from Cursor,
-  `--as claude` from Claude Code, `--as copilot`, and so on — or set `POSTFRAU_AGENT` once. The
-  user reads this in the app's history to tell which tool sent what, so putting someone else's
-  name there makes that useless. If you do not know what you are called, use the product name of
-  the tool you are running inside, not the model's. Do this on every command that sends.
-- **Secrets are hidden.** Values marked secret print as `•••`. `--reveal` prints them; only use
-  it when the user has asked you to show one.
-- **Nothing is destructive by accident.** `rm` refuses to run without `--yes`.
-- **Check before you send.** `--dry-run` prints the exact request — final URL, headers, body —
-  and writes no history.
-- **`--json` for parsing.** The human output is aligned text meant for a terminal; do not parse
-  it. `run --all --json` emits NDJSON, one object per line.
-
-## Finding the request to run
-
-You will usually be given a job in words — "execute the projection recovery" — not a path. Start
-with `find`, which searches every request's name, path, description, method and URL. Every word
-has to match, in any order:
-
-```
-postfrau find projection recovery
-postfrau find projection recovery --json    # full descriptions, for reading
+```bash
+postfrau find deposit specific --json                  # 1. locate it
+postfrau get '<path>'                                  # 2. see what it needs
+postfrau run '<path>' --env prod_deu \
+  --var deposit_id=FDA_11!_222 --json --as cursor      # 3. send it
 ```
 
-Then read the one you picked, and run it:
+Reading the words:
 
+| In the request | Becomes |
+|---|---|
+| a name or description — "deposit response", "projection recovery" | `find <words>` |
+| "in prod_deu", "on staging" | `--env prod_deu` |
+| an id or value — "for deposit FDA_11!_222" | `--var deposit_id=FDA_11!_222` |
+| "what would it send", anything against production | add `--dry-run` first |
+
+Step 2 is not optional: `get` prints the stored URL, the resolved URL, and
+`unresolvedVariables` — that list is exactly which `--var` flags step 3 needs.
+
+Quote values in single quotes. `!`, `$` and `&` are shell metacharacters.
+
+## Rules
+
+- `--as <your own name>` on everything that sends — `--as cursor`, `--as claude`, `--as copilot`.
+  Or set `POSTFRAU_AGENT` once. The user reads it in the history to tell tools apart.
+- `--json` for anything you parse. Human output is aligned text. `run --all --json` is NDJSON.
+- `--dry-run` before anything that writes, and before anything pointed at production.
+- `rm` needs `--yes`. Secrets print as `•••` unless asked for with `--reveal`.
+
+## Variables
+
+`--var` fills `{{placeholders}}` only. A value written literally in the request is not a variable
+and `--var` will not change it — `set` the request or use `send` instead. This fails silently, so
+check the resolved URL with `--dry-run` when a value does not take.
+
+```bash
+postfrau get '<path>' --var deposit_id=FDA_11!_222     # preview the resolution
+postfrau env ls                                        # what environments exist
+postfrau env use prod_deu                              # or pass --env per command
 ```
-postfrau get 'Deposit API/Backfill/Trigger projection recalculation'
-postfrau run 'Deposit API/Backfill/Trigger projection recalculation' --as cursor
-```
-
-`find` returns nothing (exit 2) when no request matches every word — drop a word and try again
-rather than guessing a path. If a literal match fails entirely it falls back to fuzzy ranking, so
-a typo still lands somewhere sensible.
-
-`ls` is for structure, not for search: bare `ls` lists collections, `ls <path>` lists one level
-under it, and `ls --tree` walks everything. In a workspace of any size `find` is what you want.
-
-**Read before you fire.** `get` shows the resolved URL, the headers and the body that will
-actually be sent, and `run --dry-run` shows the whole request without sending it. Do that before
-anything that writes, and before anything pointed at production.
-
-## Addressing things
-
-Items are addressed by path, from the collection down, case-insensitively:
-
-```
-postfrau get 'Acme API/Users/List users'
-```
-
-A literal `/` in a name is written `\/`. A UUID works anywhere a path does.
 
 ## Commands
 
-### Looking around
-
 ```bash
-postfrau ls                                  # collections
-postfrau ls 'Acme API' --tree                # the whole tree
-postfrau get 'Acme API/Users/List users'     # one request, resolved
-postfrau get 'Acme API/Users/List' --json    # the same, machine-readable
-```
+# Look
+postfrau find WORDS [--limit N]        # search names, paths, descriptions, URLs
+postfrau ls [path] [--tree]            # structure, not search
+postfrau get <path> [--var k=v]        # one request, stored + resolved
 
-`get` shows both the stored URL (`{{baseUrl}}/users`) and what it resolves to right now, plus
-any variables nothing defines — check `unresolvedVariables` before deciding a request is broken.
-
-### Sending
-
-```bash
-postfrau run 'Acme API/Users/List users' --as claude
-postfrau run 'Acme API/Users' --all --json --as claude      # a whole folder, NDJSON
-postfrau run 'Acme API/Health' --dry-run                    # what would be sent
-postfrau send GET https://api.example.com/health --as claude
+# Send
+postfrau run <path> [--env E] [--var k=v] [--dry-run] [--fail] [--out f.json]
+postfrau run <folder> --all --json     # every request under it, in order
+postfrau send GET https://api.example.com/health
 postfrau send POST https://api.example.com/users \
-  -H 'Content-Type: application/json' -d '{"name":"Ada"}' --as claude
-```
+  -H 'Content-Type: application/json' -d '{"name":"Ada"}'
 
-Useful flags: `--var k=v` overrides a variable for this run; `--fail` exits 4 on a status of 400
-or more; `--max-body 1m` raises the body limit; `--out file.json` writes the body to a file.
-
-### Editing
-
-```bash
-postfrau add 'Acme API' --collection                        # a new collection
+# Edit
+postfrau add 'Acme API' --collection
 postfrau add 'Acme API' --folder --name Users
 postfrau add 'Acme API/Users' --url 'https://api.example.com/users' --name 'List users'
 postfrau add 'Acme API/Users' --from-curl "curl -X POST https://api.example.com/users -d '{}'"
-postfrau set 'Acme API/Users/List users' --method GET -H 'Accept: application/json'
-postfrau set 'Acme API/Users/List users' -H 'X-Debug:'      # an empty value removes it
-postfrau mv 'Acme API/Health' 'Acme API/Users'
-postfrau rm 'Acme API/Users/Old' --yes
-```
+postfrau set <path> --method GET -H 'Accept: application/json'
+postfrau set <path> -H 'X-Debug:'      # empty value removes the header
+postfrau mv <path> <destination>
+postfrau rm <path> --yes
 
-`set` changes only what it is given; everything else is left alone.
-
-### Environments
-
-```bash
-postfrau env ls
+# Environments
 postfrau env add Staging
 postfrau env set Staging baseUrl=https://staging.example.com
 postfrau env set Staging token=abc123 --secret
 postfrau env use Staging
-postfrau env get Staging                     # secrets print as •••
-```
 
-### Importing a specification
-
-```bash
-postfrau validate api.json      # what is this file, and what will be lost?
-postfrau import api.json        # OpenAPI 3.x, or a Postman collection or environment
-```
-
-An OpenAPI import gives you a sendable collection, not a transcription: `servers[0]` becomes
-`{{baseUrl}}`, tags become folders, path templates become `{{variables}}` to fill in, security
-becomes the collection's auth with `{{token}}` placeholders, and a request body is built from the
-spec's example — or synthesised from its schema when it gives none. Read the warnings: they name
-what could not be modelled.
-
-JSON only. For a YAML spec, convert it first: `yq -o=json spec.yaml > spec.json`.
-
-### History
-
-```bash
+# History
 postfrau history --last 20
-postfrau history --agent claude --since 2h
-postfrau history --status 5xx --json
+postfrau history --agent claude --since 2h --status 5xx --json
 postfrau history show 1f0d567c
+
+# Import
+postfrau validate api.json             # what is it, what would be lost
+postfrau import api.json               # OpenAPI 3.x, Postman collection or environment
 ```
 
-## The `--json` shapes
+Paths run from the collection down and are case-insensitive: `'Acme API/Users/List users'`. A
+literal `/` in a name is `\/`. A UUID works anywhere a path does. `set` changes only what it is
+given.
 
-`ls` → an array of `{path, name, kind, id, method?, url?, depth}`.
+An OpenAPI import is sendable, not a transcription: `servers[0]` → `{{baseUrl}}`, tags → folders,
+path templates → `{{variables}}`, security → collection auth. JSON only; convert YAML with
+`yq -o=json spec.yaml > spec.json`. Read the warnings — they name what could not be modelled.
 
-`get` → `{path, id, name, method, url, resolvedURL, headers[], params[], auth, body, description?,
-unresolvedVariables[]}`. `auth` is a word (`bearer`, `basic:ada`, `none`, `inherit`), never a
-credential.
-
-`run` / `send` → `{path?, name, method, url, status?, reason?, durationMs, bytes, headers[],
-body?, bodyTruncated, error?, captured{}, warnings[]}`. `status` is absent and `error` is set when
-the request never reached a server.
-
-`history` → an array of `{id, sentAt, method, url, status?, durationMs, bytes, source, error?,
-recorded}`. `history show <id> --json` returns the full entry instead.
-
-For the file formats themselves, run `postfrau schema collection|request|environment|history`.
-
-## Exit codes
-
-| code | meaning |
-|------|---------|
-| 0 | ok |
-| 1 | usage — a bad flag, a missing argument, an edit that changes nothing |
-| 2 | not found — no such path, environment or history entry |
-| 3 | the request never reached a server |
-| 4 | an HTTP status of 400 or more, and `--fail` was given |
-| 5 | the data folder is unavailable |
-
-## Workflows
-
-### Explore an API and keep what works
+## Capture a token, then use it
 
 ```bash
-postfrau send GET https://api.example.com/v1/status --as claude
-postfrau add 'My API' --collection
-postfrau add 'My API' --folder --name Health
-postfrau send GET https://api.example.com/v1/status \
-  --save-to 'My API/Health' --name 'Status' --as claude
-postfrau run 'My API/Health/Status' --as claude
-```
-
-Build the collection as you learn the API, rather than at the end: each `--save-to` keeps a
-request that already worked.
-
-### Run a request and look at the response
-
-```bash
-postfrau run 'Acme API/Users/List users' --json --as claude > response.json
-```
-
-Then read `response.json`. Prefer `--json` and a file over reading a large body off stdout. If
-`status` is missing and `error` is set, the request failed before it reached the server — check
-the URL with `postfrau get <path>` rather than retrying blindly.
-
-### Log in, then call an authenticated endpoint
-
-```bash
-postfrau env use Staging
 postfrau run 'Acme API/Auth/Login' --capture token='$.data.access_token' --secret --as claude
 postfrau run 'Acme API/Users/Me' --as claude
 ```
 
-`--capture` evaluates a small JSONPath (`$.a.b[0].c`) against the response and stores the result
-in the active environment, so `{{token}}` in the next request resolves. With `--all`, a capture
-from one request is visible to the ones after it, so a whole folder can log in and then work.
+`--capture` runs a small JSONPath (`$.a.b[0].c`) against the response and stores it in the active
+environment, so `{{token}}` resolves next time. With `--all`, a capture is visible to the requests
+after it. No match exits 2; the request itself still succeeded.
 
-If the capture matches nothing, the command exits 2 and says so — the request itself still
-succeeded, and is in the history.
+## JSON shapes
 
-## When you cannot read the workspace at all
+- `find` → `[{path, name, method, url, description?}]`
+- `ls` → `[{path, name, kind, id, method?, url?, depth}]`
+- `get` → `{path, id, name, method, url, resolvedURL, headers[], params[], auth, body,
+  description?, unresolvedVariables[]}` — `auth` is a word, never a credential
+- `run` / `send` → `{path?, name, method, url, status?, reason?, durationMs, bytes, headers[],
+  body?, bodyTruncated, error?, captured{}, warnings[]}` — `status` absent and `error` set means
+  it never reached a server
+- `history` → `[{id, sentAt, method, url, status?, durationMs, bytes, source, error?, recorded}]`
 
-If you are in a sandbox that denies the collections folder — or the app's container under
-`~/Library/Containers` — no value of `--data-dir` will help: the files are unreadable, not
-misplaced. `postfrau` can ask the running app instead, over a loopback socket.
+`postfrau schema collection|request|environment|history` gives the file formats.
 
-Set one variable and every command below goes to the app, which does the file access itself:
+## Exit codes
 
-```
-export POSTFRAU_API_TOKEN=<the token from Settings ▸ Advanced ▸ Local API>
+| code | meaning |
+|---|---|
+| 0 | ok |
+| 1 | usage — bad flag, missing argument, an edit that changes nothing |
+| 2 | not found — no such path, environment, history entry, or `find` match |
+| 3 | never reached a server |
+| 4 | HTTP status ≥ 400, and `--fail` was given |
+| 5 | data folder unavailable |
+
+## In a sandbox that cannot read the files
+
+If the collections folder or `~/Library/Containers` is unreadable, `--data-dir` will not help.
+Ask the running app instead:
+
+```bash
+export POSTFRAU_API_TOKEN=<Settings ▸ Advanced ▸ Local API>
 export POSTFRAU_API_URL=http://127.0.0.1:7717     # only if the port was changed
 ```
 
-`ls`, `find`, `get`, `run`, `send` and `version` work exactly as they do locally, print the same
-output and return the same exit codes. Sends still land in the user's history, attributed. Everything
-else — `add`, `set`, `mv`, `rm`, `import`, `export`, `history`, `env` — needs a real folder and
-will say so rather than half-work.
+`ls`, `find`, `get`, `run`, `send`, `version` then work identically — same output, same exit
+codes, sends still recorded. `add`, `set`, `mv`, `rm`, `import`, `export`, `history` and `env`
+need a real folder and will say so.
 
-So the way to do a job in a sandbox is exactly the way you would do it anywhere: `postfrau find
-<words>`, then `postfrau get <path>` to check it, then `postfrau run <path>` — or
-`postfrau send METHOD URL -H …` when nothing saved fits.
+Works only while Postfrau is running. If it cannot reach the app, say so and ask the user to
+check that switch — do not copy their files somewhere readable.
 
-The user turns this on in Settings ▸ Advanced ▸ Local API; it works only while Postfrau is
-running. If a command reports that it cannot reach the app, say so and ask them to check that
-switch — do not start copying their files somewhere readable instead.
+## When something is wrong
 
-## When something is not working
-
-- `postfrau version` prints which data folder is in use and where it came from — or, with
-  `POSTFRAU_API_TOKEN` set, which app it is talking to.
-- Exit code 5 means the folder is not available: an unmounted volume, or a path the app has
-  since changed. `--data-dir` points at one explicitly. If the folder is *unreadable* rather than
-  wrong, use the local API above.
-- A secret that will not resolve may be a Keychain prompt nobody answered. Supply it for one
-  command with `POSTFRAU_SECRET_<KEY>=value` in the environment instead.
+- `postfrau version` — which data folder, and where it came from; or which app, with a token set.
+- Exit 5 — folder unavailable. Unreadable rather than wrong? Use the local API above.
+- A secret that will not resolve is usually an unanswered Keychain prompt: pass
+  `POSTFRAU_SECRET_<KEY>=value` in the environment for that one command.
+- `find` returns nothing (exit 2) when not every word matches. Drop a word rather than guessing a
+  path.

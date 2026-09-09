@@ -61,8 +61,9 @@ convert YAML first with `yq -o=json spec.yaml > spec.json`.
 ## CLI
 
 ```bash
-postfrau ls 'Acme API' --tree
-postfrau run 'Acme API/Users/List users' --json
+postfrau find deposit balance                 # search names, paths, descriptions, URLs
+postfrau get 'Acme API/Users/List users'      # stored URL, resolved URL, what is unresolved
+postfrau run 'Acme API/Users/List users' --env staging --var user_id=42 --json
 postfrau send POST https://api.example.com/users -H 'Content-Type: application/json' -d '{"name":"Ada"}'
 postfrau history --last 20
 ```
@@ -80,7 +81,7 @@ Needs macOS 26, Xcode 26 and [XcodeGen](https://github.com/yonaskolb/XcodeGen). 
 make gen      # generate the Xcode project
 make build    # app + CLI
 make run
-make test     # 495 Core tests + app tests
+make test     # 532 Core tests + app tests
 make release  # signed DMG in dist/
 ```
 

@@ -1,7 +1,7 @@
 # Postfrau — status
 
 **v1 complete.** All twelve phases of `PLAN.md` are ticked; `Scripts/release.sh` produces
-`dist/Postfrau-2.1.dmg`.
+`dist/Postfrau-2.2.dmg`.
 
 **Build:** green — `make test` passes: 532 Core tests (~6 s) plus the app unit tests.
 `make live-test` adds the ones that talk to the real network; `make ui-test` the ones that drive
