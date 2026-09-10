@@ -289,7 +289,18 @@ extension AppState {
             },
             set: { [weak self] isExpanded in
                 guard let self else { return }
-                if isExpanded { self.expandedIDs.insert(id) } else { self.expandedIDs.remove(id) }
+                // No animation. `DisclosureGroup` slides its rows open by default, and a
+                // collection holding hundreds of them spends that whole slide laying them out —
+                // opening one should just show it.
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) {
+                    if isExpanded {
+                        self.expandedIDs.insert(id)
+                    } else {
+                        self.expandedIDs.remove(id)
+                    }
+                }
                 self.markUIStateDirty()
             })
     }
