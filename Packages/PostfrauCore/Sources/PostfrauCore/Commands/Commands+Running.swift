@@ -310,7 +310,8 @@ extension CommandRunner {
             level: recordLevel ?? settings.historyRecording,
             secrets: secrets,
             bodyCap: settings.historyBodyCapBytes,
-            source: source)
+            source: source,
+            storesResponseBody: settings.historyStoresResponseBodies)
 
         guard let entry = await HistoryRecorder.entry(
             for: HistoryRecorder.Exchange(

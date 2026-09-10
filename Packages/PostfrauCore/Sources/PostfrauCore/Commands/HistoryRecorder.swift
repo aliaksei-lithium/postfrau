@@ -15,17 +15,23 @@ public enum HistoryRecorder {
         public var secrets: Set<String>
         public var bodyCap: Int
         public var source: HistorySource
+        /// Whether the response body is kept when `level` is `.full`. Separate from the level so
+        /// a log can hold everything that was *sent* without holding what came back, which is
+        /// usually the larger half and the one carrying somebody's data.
+        public var storesResponseBody: Bool
 
         public init(
             level: HistoryRecordLevel,
             secrets: Set<String>,
             bodyCap: Int,
-            source: HistorySource
+            source: HistorySource,
+            storesResponseBody: Bool = true
         ) {
             self.level = level
             self.secrets = secrets
             self.bodyCap = bodyCap
             self.source = source
+            self.storesResponseBody = storesResponseBody
         }
     }
 
@@ -91,7 +97,9 @@ public enum HistoryRecorder {
         }
         if policy.level.recordsBodies {
             entry.requestBody = requestBody(exchange.built, policy: policy)
-            entry.responseBody = responseBody(exchange.response, policy: policy)
+            if policy.storesResponseBody {
+                entry.responseBody = responseBody(exchange.response, policy: policy)
+            }
         }
         return entry
     }

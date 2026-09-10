@@ -56,7 +56,8 @@ extension AppState {
             level: recordLevel(forCollection: tab.collectionID),
             secrets: HistoryRecorder.secrets(
                 in: scope(for: tab), auth: auth, resolver: resolver),
-            bodyCap: settings.historyBodyCapBytes)
+            bodyCap: settings.historyBodyCapBytes,
+            storesResponseBody: settings.historyStoresResponseBodies)
 
         tab.sendTask = Task { [weak self, weak tab] in
             guard let self, let tab else { return }
@@ -116,6 +117,7 @@ extension AppState {
         var level: HistoryRecordLevel
         var secrets: Set<String>
         var bodyCap: Int
+        var storesResponseBody: Bool
     }
 
     /// Hands the exchange to `HistoryRecorder`, which the CLI uses too.
@@ -145,7 +147,8 @@ extension AppState {
                 level: recording.level,
                 secrets: recording.secrets,
                 bodyCap: recording.bodyCap,
-                source: .app))
+                source: .app,
+                storesResponseBody: recording.storesResponseBody))
 
         guard let entry else { return }
         await appendHistory(entry)

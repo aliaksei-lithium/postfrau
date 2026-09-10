@@ -10,7 +10,13 @@ import PostfrauCore
 @MainActor
 struct EnvironmentTests {
     /// An `AppState` on a temporary data folder with a throwaway Keychain service.
-    private func makeState() -> (AppState, URL, SecretsStore) {
+    ///
+    /// Secrets are put back in the Keychain: that is what these tests are about, and since D57 it
+    /// is no longer the default — the data folder is. A test that means to exercise the Keychain
+    /// has to say so, the same as a user does.
+    private func makeState(
+        secretStorage: SecretStorage = .keychain
+    ) -> (AppState, URL, SecretsStore) {
         let root = URL.temporaryDirectory.appending(path: "env-tests-\(UUID().uuidString)")
         let secrets = SecretsStore(service: "com.postfrau.tests.\(UUID().uuidString)")
         let state = AppState(
@@ -18,6 +24,7 @@ struct EnvironmentTests {
                 dataFolder: DataFolder(root: root, needsCoordination: false), localRoot: root),
             history: HistoryStore(root: root.appending(path: "history")),
             secretsStore: secrets)
+        state.settings.secretStorage = secretStorage
         return (state, root, secrets)
     }
 
@@ -35,6 +42,20 @@ struct EnvironmentTests {
         withKnownIssue("Keychain is unavailable in this environment.", isIntermittent: true) {
             Issue.record("skipped")
         }
+    }
+
+    @Test("In data-folder mode the Keychain is not written to at all")
+    func dataFolderModeLeavesTheKeychainAlone() async throws {
+        let (state, _, secrets) = makeState(secretStorage: .dataFolder)
+        var environment = state.newEnvironment(named: "Prod")
+        environment.variables = [Variable(key: "token", value: "in the folder", isSecret: true)]
+        state.update(environment)
+        try await Task.sleep(for: .milliseconds(300))
+
+        // The value is in the model, and that is where the workspace file will pick it up from.
+        #expect(state.workspace.environments[0].variables[0].value == "in the folder")
+        // And nowhere near the Keychain, which is the whole point of the setting.
+        #expect(try await secrets.value(scope: environment.id, key: "token") == nil)
     }
 
     @Test("The toolbar button sets one secret in the active environment")

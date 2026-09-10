@@ -1096,3 +1096,31 @@ that quietly destroys things is not a launch anyone wants — while the explicit
 giving up the Keychain, and `Scripts/release.sh` already honours `CODESIGN_IDENTITY`. It needs a
 certificate in the login keychain, which is a change to the machine rather than to this
 repository, so it is offered rather than done.
+
+## D58 — History keeps the response, and the switch for that is its own
+
+`historyRecording` defaulted to `.metadata`, so an entry recorded that a request had happened and
+what came back only as a status and a byte count. The model already had somewhere to put the
+answer — `HistoryEntry.responseBody` — and the viewer already knew how to show it; only the
+default kept it empty. The default is now `.full`.
+
+**Why a separate switch rather than just the level.** The level is a ladder — off, metadata,
+headers, bodies — and at the top it means *both* bodies. The response is usually the larger half
+and the one carrying somebody's data, so "record what I sent, not what came back" is a position
+worth being able to hold. `Policy.storesResponseBody` and `AppSettings.historyStoresResponseBodies`
+make it one, on by default, shown under the level picker and only when the level records bodies at
+all. Turning it off drops the response body and nothing else: headers, status and the request are
+all still there, which is what makes it different from stepping down to `.headers`.
+
+**This does not reach a workspace that already chose.** `historyRecording` is written into
+`settings.json` the first time the pane is touched, and a stored `metadata` beats a changed
+default. Bumping `Postfrau.schemaVersion` to migrate one local preference would put every document
+in the data folder through a migration step for the sake of a setting that never leaves the Mac,
+so it is not done: the picker is in Settings ▸ History, one click away.
+
+**Fallout worth recording.** Three `EnvironmentTests` broke on this build — not from this change
+but from D57, which made writing to the Keychain conditional on the setting. They assert Keychain
+behaviour while `makeState` was handing them the new default, so they were asserting something the
+app no longer does by default. Fixed where the fault was, by making those tests ask for
+`.keychain` explicitly, plus a new one that pins the other half: in data-folder mode nothing
+reaches the Keychain at all.

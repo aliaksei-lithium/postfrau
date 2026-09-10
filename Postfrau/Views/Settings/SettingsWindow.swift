@@ -41,6 +41,11 @@ struct HistorySettings: View {
                     .foregroundStyle(.secondary)
 
                 if state.settings.historyRecording.recordsBodies {
+                    Toggle("Store response bodies", isOn: storesResponseBodies)
+                        .help(
+                            "Off keeps the request and its headers, but not what came back — "
+                                + "the larger half, and the one carrying somebody's data.")
+
                     Picker("Body size limit", selection: bodyCap) {
                         ForEach(Self.bodyCaps, id: \.self) { bytes in
                             Text(ByteCount.format(bytes)).tag(bytes)
@@ -94,6 +99,10 @@ struct HistorySettings: View {
 
     private var recording: Binding<HistoryRecordLevel> {
         setting(\.historyRecording)
+    }
+
+    private var storesResponseBodies: Binding<Bool> {
+        setting(\.historyStoresResponseBodies)
     }
 
     private var bodyCap: Binding<Int> {

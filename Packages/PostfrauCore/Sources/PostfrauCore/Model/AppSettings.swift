@@ -80,6 +80,10 @@ public struct AppSettings: Sendable, Hashable, Codable {
     public var maxHistoryEntries: Int
     /// How much of each exchange is written to history.
     public var historyRecording: HistoryRecordLevel
+    /// Whether the response body is kept, when the level keeps bodies at all. On by default: a
+    /// history entry you cannot see the answer in is of little use when you are trying to work
+    /// out what an endpoint did yesterday.
+    public var historyStoresResponseBodies: Bool
     /// The most bytes of any one body kept in a history entry.
     public var historyBodyCapBytes: Int
     /// Whether the HTML preview may run JavaScript and load subresources. Off by default so a
@@ -108,7 +112,8 @@ public struct AppSettings: Sendable, Hashable, Codable {
         defaultTimeoutSeconds: Double = 30,
         defaultVerifyTLS: Bool = true,
         maxHistoryEntries: Int = 1000,
-        historyRecording: HistoryRecordLevel = .metadata,
+        historyRecording: HistoryRecordLevel = .full,
+        historyStoresResponseBodies: Bool = true,
         historyBodyCapBytes: Int = 262_144,
         allowPreviewJavaScript: Bool = false,
         wrapResponseLines: Bool = true,
@@ -128,6 +133,7 @@ public struct AppSettings: Sendable, Hashable, Codable {
         self.defaultVerifyTLS = defaultVerifyTLS
         self.maxHistoryEntries = maxHistoryEntries
         self.historyRecording = historyRecording
+        self.historyStoresResponseBodies = historyStoresResponseBodies
         self.historyBodyCapBytes = historyBodyCapBytes
         self.allowPreviewJavaScript = allowPreviewJavaScript
         self.wrapResponseLines = wrapResponseLines
@@ -143,7 +149,7 @@ public struct AppSettings: Sendable, Hashable, Codable {
         case appearance
         case editorFontSize, responseLayout, defaultTimeoutSeconds, defaultVerifyTLS
         case maxHistoryEntries, allowPreviewJavaScript, wrapResponseLines, showResponseLineNumbers
-        case historyRecording, historyBodyCapBytes
+        case historyRecording, historyStoresResponseBodies, historyBodyCapBytes
         case localAPIEnabled, localAPIPort, localAPIToken
     }
 
@@ -164,6 +170,9 @@ public struct AppSettings: Sendable, Hashable, Codable {
         maxHistoryEntries = try c.decodeIfPresent(Int.self, forKey: .maxHistoryEntries) ?? d.maxHistoryEntries
         historyRecording =
             try c.decodeIfPresent(HistoryRecordLevel.self, forKey: .historyRecording) ?? d.historyRecording
+        historyStoresResponseBodies =
+            try c.decodeIfPresent(Bool.self, forKey: .historyStoresResponseBodies)
+            ?? d.historyStoresResponseBodies
         historyBodyCapBytes =
             try c.decodeIfPresent(Int.self, forKey: .historyBodyCapBytes) ?? d.historyBodyCapBytes
         allowPreviewJavaScript =
