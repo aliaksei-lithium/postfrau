@@ -93,9 +93,26 @@ struct TabItem: View {
         .padding(.horizontal, 10)
         .frame(height: 32)
         .frame(minWidth: 110, maxWidth: 220)
-        .background(isSelected ? AnyShapeStyle(.selection.opacity(0.25)) : AnyShapeStyle(.clear))
+        .background {
+            if isSelected {
+                Color(nsColor: .selectedContentBackgroundColor).opacity(0.16)
+            } else if isHovering {
+                Color.primary.opacity(0.08)
+            }
+        }
         .overlay(alignment: .trailing) {
             Rectangle().fill(Color(nsColor: .separatorColor)).frame(width: 1)
+        }
+        // The line, not the wash, is what makes the selected tab findable at a glance — the wash
+        // alone was too close to the strip behind it. Lifted a point so the strip's own hairline
+        // runs under it rather than through it.
+        .overlay(alignment: .bottom) {
+            if isSelected {
+                Rectangle()
+                    .fill(.tint)
+                    .frame(height: 2)
+                    .padding(.bottom, 1)
+            }
         }
         .contentShape(.rect)
         // One tap gesture; the double click comes from the AppKit event. Pairing a `count: 2`

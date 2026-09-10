@@ -76,6 +76,47 @@ final class CollectionsTests: XCTestCase {
         XCTAssertTrue(sidebarRow(app, "GET New Request").exists)
     }
 
+    /// Dragging still moves a request, now that pressing a row selects it.
+    ///
+    /// Selection moved onto the press (D54) so the highlight does not wait for the button to come
+    /// up, and a gesture that fires on the press is exactly the kind of thing that can stop
+    /// `draggable` ever starting. Synthetic `CGEvent` drags do not drive SwiftUI drag-and-drop at
+    /// all — verified by a control run — so this is the only place the question can be settled.
+    ///
+    /// The assertion is structural rather than visual: the request is dragged out of the folder
+    /// onto the collection root, then the folder is deleted. A request that never left would go
+    /// with it.
+    func testDraggingARequestOutOfAFolderStillMovesIt() {
+        let app = launchApp()
+
+        app.typeKey("n", modifierFlags: [.command, .shift])
+        let collection = sidebarRow(app, "Collection New Collection")
+        XCTAssertTrue(collection.waitForExistence(timeout: 10))
+
+        collection.rightClick()
+        clickContextMenuItem(app, "New Folder")
+        let folder = sidebarRow(app, "Folder New Folder")
+        XCTAssertTrue(folder.waitForExistence(timeout: 10))
+
+        folder.rightClick()
+        clickContextMenuItem(app, "New Request")
+        let request = sidebarRow(app, "GET New Request")
+        XCTAssertTrue(request.waitForExistence(timeout: 10))
+
+        request.press(forDuration: 0.3, thenDragTo: collection)
+        Thread.sleep(forTimeInterval: 1)
+
+        folder.rightClick()
+        clickContextMenuItem(app, "Delete")
+        XCTAssertFalse(
+            sidebarRow(app, "Folder New Folder").waitForExistence(timeout: 5),
+            "the folder should be gone")
+        XCTAssertTrue(
+            sidebarRow(app, "GET New Request").exists,
+            "the request should have been dragged out of the folder, so deleting the folder "
+                + "should not take it too")
+    }
+
     func testDeletingARequestCanBeUndone() {
         let app = launchApp()
 

@@ -33,11 +33,35 @@ struct CollectionsTree: View {
     }
 }
 
+/// The wash under a hovered sidebar row.
+///
+/// `listRowBackground` rather than `background`, so it takes the row's own shape and inset
+/// instead of hugging the text. Never drawn under a selected row: `List` draws its highlight
+/// there, and tinting over the top of it only muddies the blue.
+private struct RowHover: ViewModifier {
+    var isHovering: Bool
+    var isSelected = false
+
+    func body(content: Content) -> some View {
+        content.listRowBackground(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color.primary.opacity(isHovering && !isSelected ? 0.06 : 0))
+                .padding(.horizontal, 10))
+    }
+}
+
+extension View {
+    fileprivate func rowHover(_ isHovering: Bool, isSelected: Bool = false) -> some View {
+        modifier(RowHover(isHovering: isHovering, isSelected: isSelected))
+    }
+}
+
 struct CollectionRow: View {
     @Environment(AppState.self) private var state
     var collection: RequestCollection
     var forcedOpen: Set<UUID>
 
+    @State private var isHovering = false
     @State private var isRenaming = false
     @State private var draftName = ""
     @State private var isConfirmingDelete = false
@@ -108,6 +132,7 @@ struct CollectionRow: View {
             // Collections and folders carry no `.tag`, so they are not selectable and a plain
             // tap gesture costs nothing here. Requests are the ones that had to change.
             .onTapGesture(count: 2) { state.openCollectionEditor(collection.id) }
+            .onHover { isHovering = $0 }
             .contextMenu { menu }
             .dropDestination(for: DraggedItem.self) { items, _ in
                 return state.handleDrop(items, collectionID: collection.id, parentID: nil)
@@ -121,6 +146,7 @@ struct CollectionRow: View {
                 Text("\(collection.requestCount) request(s) will be removed. This can be undone.")
             }
         }
+        .rowHover(isHovering)
     }
 
     @ViewBuilder
@@ -180,6 +206,7 @@ struct FolderRow: View {
     var collectionID: UUID
     var forcedOpen: Set<UUID>
 
+    @State private var isHovering = false
     @State private var isRenaming = false
     @State private var draftName = ""
     @FocusState private var renameFocused: Bool
@@ -210,6 +237,7 @@ struct FolderRow: View {
             .accessibilityLabel("Folder \(folder.name)")
             .contentShape(.rect)
             .onTapGesture(count: 2) { state.openFolderEditor(folder.id, in: collectionID) }
+            .onHover { isHovering = $0 }
             .contextMenu {
                 Button("New Request") { state.newRequest(in: collectionID, parentID: folder.id) }
                 Button("New Folder") { state.newFolder(in: collectionID, parentID: folder.id) }
@@ -225,6 +253,7 @@ struct FolderRow: View {
                 return state.handleDrop(items, collectionID: collectionID, parentID: folder.id)
             }
         }
+        .rowHover(isHovering)
     }
 
     private func beginRename() {
@@ -246,12 +275,18 @@ struct FolderRow: View {
 
 struct RequestRow: View {
     @Environment(AppState.self) private var state
+    // Set by `List` on the selected row. Read here rather than comparing against
+    // `state.sidebarSelection`, which would make all forty rows rebuild on every selection change.
+    @Environment(\.backgroundProminence) private var prominence
     var request: RequestItem
     var collectionID: UUID
 
     @State private var isRenaming = false
     @State private var draftName = ""
+    @State private var isHovering = false
     @FocusState private var renameFocused: Bool
+
+    private var isSelected: Bool { prominence == .increased }
 
     var body: some View {
         HStack(spacing: 6) {
@@ -274,21 +309,40 @@ struct RequestRow: View {
         .accessibilityLabel("\(request.method.rawValue) \(request.name)")
         .accessibilityAddTraits(.isButton)
         .contentShape(.rect)
-        // Two taps, higher count first, and the single tap sets the selection itself.
+        // Selection happens on the press, not on the release.
         //
-        // A `List` row cannot keep its own selection behaviour alongside a tap gesture:
-        // `onTapGesture(count: 2)` and `simultaneousGesture` both swallow the single click and
-        // the highlight stops following what you click. Since the selection is ours anyway, the
-        // row sets it. Arrow keys still go through the list's binding.
+        // `List`'s own selection — and every SwiftUI tap gesture — acts on mouse *up*, so the
+        // highlight arrived however long the button happened to be held: a 120 ms press put it
+        // 155 ms after the press, while an arrow key, which acts on key down, felt immediate.
+        // That difference, not any work, is what made clicking the sidebar feel slow.
         //
-        // One tap gesture, and the double click comes from the AppKit event. A `count: 2` tap
-        // gesture beside a single one makes SwiftUI hold the single action for the whole
-        // `NSEvent.doubleClickInterval` — ~400 ms here — while it waits to see whether a second
-        // click arrives. That wait, not any work, was the lag. See `docs/decisions.md` D52.
-        .onTapGesture {
+        // A zero-distance `DragGesture` is the only SwiftUI gesture that fires on the press. It
+        // also settles the double click without a timer: the second press already carries
+        // `clickCount == 2`, so nothing has to wait out `NSEvent.doubleClickInterval` to find
+        // out. See `docs/decisions.md` D54.
+        // Selection happens on the press, not on the release.
+        //
+        // `List`'s own selection — and every SwiftUI tap gesture — acts on mouse *up*, so the
+        // highlight arrived however long the button happened to be held: measured, a 120 ms press
+        // put it 155 ms after the press, while an arrow key, which acts on key down, felt
+        // immediate. That difference, not any work, is what made clicking the sidebar feel slow.
+        //
+        // A zero-duration long press is the cheapest gesture that fires on the press, and being
+        // zero-duration it has finished by the time a drag could begin. `simultaneousGesture`
+        // rather than `gesture` so it never claims the row exclusively and `draggable` keeps
+        // working. It also settles the double click without a timer: the second press
+        // already carries `clickCount == 2`, so nothing waits out `NSEvent.doubleClickInterval`
+        // to find out. See `docs/decisions.md` D54.
+        .simultaneousGesture(LongPressGesture(minimumDuration: 0).onEnded { _ in
             state.sidebarSelection = request.id
             if NSApp.currentEvent?.clickCount == 2 { state.openRequest(id: request.id) }
-        }
+        })
+        .onHover { isHovering = $0 }
+        .rowHover(isHovering, isSelected: isSelected)
+        // No tap gesture at all: selection is the list's own again, so AppKit highlights the
+        // row as the mouse goes down rather than waiting for `AppState` to come back round.
+        // Opening on double click is handled once for the whole list in `SidebarView`, by a
+        // recognizer that does not delay the single click. See `docs/decisions.md` D54.
         .contextMenu {
             Button("Open") { state.openRequest(id: request.id) }
             Button("Rename…") { beginRename() }

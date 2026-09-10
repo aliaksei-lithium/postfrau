@@ -1,7 +1,13 @@
 #!/bin/bash
 # Measures click-to-paint latency for the sidebar and the tab strip.
 #
-#   Tools/measure-latency.sh <tabs|sidebar> [clicks] ["target A" "target B"]
+#   Tools/measure-latency.sh <tabs|sidebar|paint> [clicks] ["target A" "target B"]
+#
+# `paint` is the one that matches what a person sees: it times a press to the commit in which the
+# sidebar's row highlight actually changes, and it holds the button for 120 ms, which is roughly
+# a real click. `sidebar` and `tabs` time the press to the run loop going idle, which is when the
+# *state* settles — a different and more flattering number. Selection used to happen on mouse-up,
+# so the highlight arrived 120 ms later than this; see D54.
 #
 # With no targets it picks the two nearest the middle. Name them explicitly when comparing two
 # builds: the cost of a switch depends on the request in the tab, and the strip's scroll position
@@ -31,8 +37,10 @@ MODE=${1:-tabs}
 CLICKS=${2:-14}
 WANT_A=${3:-}
 WANT_B=${4:-}
-case "$MODE" in tabs|sidebar) ;; *) echo "usage: $0 <tabs|sidebar> [clicks]" >&2; exit 2 ;; esac
+case "$MODE" in tabs|sidebar|paint) ;;
+  *) echo "usage: $0 <tabs|sidebar|paint> [clicks]" >&2; exit 2 ;; esac
 LABEL=$([ "$MODE" = tabs ] && echo tab || echo select)
+BAND_MODE=$([ "$MODE" = tabs ] && echo tabs || echo sidebar)
 
 pgrep -x Postfrau >/dev/null || { echo "Postfrau is not running." >&2; exit 1; }
 
@@ -96,15 +104,22 @@ func scan(_ band: ClosedRange<Double>) -> [(String, CGRect)] {
 }
 
 func click(_ p: CGPoint) {
-    for t in [CGEventType.mouseMoved, .leftMouseDown, .leftMouseUp] {
-        CGEvent(mouseEventSource: nil, mouseType: t, mouseCursorPosition: p, mouseButton: .left)?
-            .post(tap: .cghidEventTap)
-        usleep(t == .mouseMoved ? 15000 : 30000)
-    }
+    CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: p, mouseButton: .left)?
+        .post(tap: .cghidEventTap)
+    usleep(15000)
+    CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: p, mouseButton: .left)?
+        .post(tap: .cghidEventTap)
+    usleep(hold)
+    CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: p, mouseButton: .left)?
+        .post(tap: .cghidEventTap)
 }
 
 let mode = CommandLine.arguments[1]
 let rounds = Int(CommandLine.arguments[2])!
+// Long enough to be a real click. Selection used to wait for the button to come up, so this is
+// the difference between a number that looks fine and one that matches what you see.
+let hold: UInt32 = ProcessInfo.processInfo.environment["POSTFRAU_HOLD_MS"]
+    .flatMap { UInt32($0) }.map { $0 * 1000 } ?? 120_000
 // The tab strip sits just under the toolbar; sidebar rows fill the column below the filter.
 let band: ClosedRange<Double> = mode == "tabs" ? 130...170 : 250...800
 
@@ -169,11 +184,22 @@ LOGGER=$!
 trap 'kill $LOGGER 2>/dev/null || true; rm -rf "$WORK"' EXIT
 sleep 2
 
-"$WORK/ax" "$MODE" "$CLICKS" "$WANT_A" "$WANT_B"
+"$WORK/ax" "$BAND_MODE" "$CLICKS" "$WANT_A" "$WANT_B"
 sleep 1.5
 kill $LOGGER 2>/dev/null || true
 wait $LOGGER 2>/dev/null || true
 
+if [ "$MODE" = paint ]; then
+  grep -o "highlight painted.*" "$WORK/log.txt" || true
+  echo
+  grep -o "highlight painted.*" "$WORK/log.txt" \
+    | sed 's/highlight painted //; s/ ms after down.*//' | sort -n \
+    | awk '{v[NR]=$1}
+           END {if (NR == 0) { print "no highlight changes seen"; exit 1 }
+                printf "paint: n=%d  median %.1f ms from mouse-down  min %.1f  max %.1f\n",
+                       NR, (NR%2 ? v[(NR+1)/2] : (v[NR/2]+v[NR/2+1])/2), v[1], v[NR]}'
+  exit 0
+fi
 grep -o "$LABEL-click held.*" "$WORK/log.txt" || true
 echo
 grep -o "$LABEL-click held.*" "$WORK/log.txt" \

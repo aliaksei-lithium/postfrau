@@ -924,3 +924,56 @@ re-clicking an already-selected tab costs ~1 ms and will quietly halve a median,
 a switch depends on which request is in the tab — so a before/after has to name the same pair
 rather than let the harness pick, which is what `Tools/measure-latency.sh`'s optional target
 arguments are for.
+
+## D54 — Clicking felt slower than the arrow keys because selection waited for the button to come up
+
+The complaint outlived both D52 and D53, and both of those had measured the wrong thing. D52 timed
+CPU busy work; D53 timed the moment application *state* settled — 16 ms, which looked fine. Neither
+timed the moment the row highlight changes colour, which is the only thing a person can see.
+
+`Postfrau/Support/SelectionPaintProbe.swift` times it: `List` is an `NSTableView` underneath, that
+view redraws its highlight in the commit where its own `selectedRow` changes, and a local event
+monitor gives the timestamp of the press that caused it. Held against a **120 ms button press**,
+which is an ordinary click rather than the 30 ms one a synthetic harness produces:
+
+| | highlight appears |
+|---|---|
+| v2.3 | **150 ms** after the press |
+| now | **17 ms** after the press |
+
+**The cause.** `List`'s own selection, and every SwiftUI tap gesture, acts on mouse *up*. So the
+highlight could not appear until the button was released, and the lag was however long the button
+happened to be held — 150 ms measured at 120 ms, 230 ms at 200 ms. An arrow key acts on key *down*
+and so felt immediate. The gap was never work; it was the button still being down. This is also
+why a 30 ms synthetic click made the two paths look identical (54 ms against 58 ms) and hid the
+defect completely — the harness was pressing far faster than a hand can.
+
+**The fix** is a zero-duration `LongPressGesture`, the cheapest SwiftUI gesture that fires on the
+press, attached with `simultaneousGesture` so it never claims the row exclusively. It also settles
+the double click without a timer: the second press already carries `clickCount == 2`, so nothing
+waits out `NSEvent.doubleClickInterval` to find out — the trap D52 documented.
+
+**Four other routes, all tried and rejected by measurement.** An `NSClickGestureRecognizer` on the
+`SwiftUIOutlineListView` never fires at all, even at `numberOfClicksRequired = 1` — SwiftUI routes
+list events past AppKit's gesture machinery. An `NSViewRepresentable` in the row's `background` or
+`overlay` never receives the events either. A lone `onTapGesture(count: 2)` swallows single clicks
+outright, so the list stops selecting. `contextMenu(forSelectionType:primaryAction:)` is the
+correct native double click and does work — but only while the row has no gesture of its own, and
+selecting on the press requires one.
+
+**What could not be verified here.** A gesture that fires on the press is exactly the kind of thing
+that can stop `draggable` ever starting, and this environment cannot test drag-and-drop: synthetic
+`CGEvent` drags do not drive SwiftUI drag-and-drop at all (confirmed with a control run on a build
+carrying no new gesture), and XCUITest cannot start — "Timed out while enabling automation mode"
+(D22 again). `testDraggingARequestOutOfAFolderStillMovesIt` in `PostfrauUITests` covers it for any
+machine where the runner does start.
+
+**Also in this change.** Sidebar rows wash light grey under the pointer, drawn with
+`listRowBackground` so the shape matches the selection capsule rather than hugging the text, and
+never under the selected row. The selected tab gains an accent underline: the wash alone was too
+close to the strip behind it, and unselected tabs now wash on hover too.
+
+**The method lesson, third time of asking.** Pick the metric from the complaint. "Clicking feels
+slow" is about pixels changing, so measure pixels changing — not CPU (D52), not state (D53). And
+a synthetic input harness must imitate the *timing* of a hand, not just its coordinates; a click
+that is 90 ms too short hides the entire defect.
