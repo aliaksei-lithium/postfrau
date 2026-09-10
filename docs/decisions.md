@@ -1009,29 +1009,41 @@ primaryAction:)`, which is the list's own and so also leaves `draggable` alone. 
 name — `CollectionRow` and `FolderRow` already had a trailing `Spacer` and it did not — so
 hovering, or right-clicking, the empty space beside a short name did nothing at all.
 
-## D56 — Tabs cannot be reordered by dragging, and why not
+## D56 — Tabs reorder by dragging, and the strip had to stop being a `ScrollView` for it
 
-The tab strip's doc comment claimed drag reordering; there was no drag code in it, and
-`AppState.moveTab` had no caller. Adding it does not work, and the reason is worth writing down
-because five separate approaches failed the same way.
+The strip's doc comment claimed drag reordering. There was no drag code in it, and
+`AppState.moveTab` had no caller — it had never been built.
 
-The strip is a horizontal `ScrollView`, and on macOS 26 that takes horizontal mouse drags and
-does nothing with them:
+Adding it does not work while the strip is a horizontal `ScrollView`. That view takes horizontal
+mouse drags and does nothing with them — it does not even scroll — and everything downstream
+starves:
 
 | approach | what happened |
 |---|---|
-| `draggable` + `dropDestination` on a tab | payload never so much as asked for — however slow or crooked the drag |
+| `draggable` + `dropDestination` on a tab | payload never so much as asked for, however slow or crooked the drag |
 | `highPriorityGesture(DragGesture(minimumDistance: 0))` on a tab | fires, but `translation` is exactly zero at `onEnded` |
 | the same gesture on the `ScrollView` | never fires |
 | `.scrollDisabled(true)` | gesture still never fires, and the wheel stops working too |
-| `NSEvent.addLocalMonitorForEvents` | sees the mouse going down and nothing after it: whatever tracks the drag pulls events with `nextEventMatchingMask:`, which monitors never see |
-| `NSPanGestureRecognizer` on the window's content view | never fires, exactly like the click recognizer tried in D54 |
+| `NSEvent.addLocalMonitorForEvents` | sees the mouse going down and nothing after: whatever tracks the drag pulls events with `nextEventMatchingMask:`, which monitors never see |
+| `NSPanGestureRecognizer` on the window's content view | never fires, exactly like the click recognizer of D54 |
 
-A diagonal drag *does* start `draggable`, which is what pins it on the horizontal axis rather than
-on drag-and-drop generally. Scroll-wheel events, unlike mouse drags, do reach a local monitor.
+A *diagonal* drag does start `draggable`, which is what pins this on the horizontal axis rather
+than on drag-and-drop in general. Take the `ScrollView` away and reordering works on the first
+try.
 
-So reordering needs the strip to stop being a `ScrollView` — a clipped `HStack` at an offset this
-code owns, with the wheel handled through a local monitor and scroll-into-view computed from the
-tab frames it already collects. That is a rewrite of the most-used piece of chrome in the app and
-is not something to land unverified at the end of a long session, so it is written down rather
-than half-done. `moveTab` and its persistence are already there and already correct.
+**So the strip scrolls itself.** A clipped `HStack` at an offset this code owns, about forty
+lines: the wheel read from a local monitor — scroll events, unlike drags, do reach one — and the
+selected tab scrolled into view from the frames the strip already collects. `moveTab` was already
+correct and already marked the UI state dirty, so a reorder survives a relaunch.
+
+Two things that only showed up once it was running, both from `GeometryReader` having no size of
+its own and taking everything it is offered:
+
+* `fixedSize` propagates the content's ideal width outwards, so measuring the viewport with
+  `frame(maxWidth: .infinity)` returned the *content* width — 3 879 points — and there was
+  nothing to clip against. A reader takes the space it is offered and no more.
+* Its siblings got nothing: the divider and the "+" button were pushed clean off the end of the
+  window. `layoutPriority(1)` lays them out first.
+
+Verified end to end: reorder by dragging, order kept across a relaunch, wheel scrolling both ways,
+a newly opened tab scrolled into view, click to select, double click to rename, and "+".
