@@ -1009,6 +1009,14 @@ primaryAction:)`, which is the list's own and so also leaves `draggable` alone. 
 name — `CollectionRow` and `FolderRow` already had a trailing `Spacer` and it did not — so
 hovering, or right-clicking, the empty space beside a short name did nothing at all.
 
+**And the hover is watched on the row's background, not its content.** Even filling the width,
+the content of a nested row starts *after* the disclosure indent — measured, some 45 points in —
+so sweeping the pointer down the left of the sidebar lit nothing until it reached the method
+badge, while the wash that would appear covers the whole width. The `listRowBackground` is the
+only part of the row that is actually the width of the row, so `onHover` goes there. It sits
+behind the content and takes no clicks away from it: clicking, dragging and the context menu all
+still work through the indent.
+
 ## D56 — Tabs reorder by dragging, and the strip had to stop being a `ScrollView` for it
 
 The strip's doc comment claimed drag reordering. There was no drag code in it, and
