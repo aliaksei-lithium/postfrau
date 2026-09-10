@@ -35,6 +35,15 @@ struct SidebarView: View {
             }
             .listStyle(.sidebar)
             .onChange(of: state.sidebarSelection) { ClickProbe.marked("select") }
+            // Double click opens. `primaryAction` is the list's own, so unlike a gesture on the
+            // row it leaves `draggable` alone — and `PressToSelect` has already put the selection
+            // on the row under the pointer by the time the second click lands.
+            .contextMenu(forSelectionType: UUID.self) { _ in
+                EmptyView()
+            } primaryAction: { ids in
+                if let id = ids.first { state.openRequest(id: id) }
+            }
+            .background(PressToSelect())
             .background(SelectionPaintWatcher())
             // Dropping a file on the sidebar is the other obvious way to import one.
             .dropDestination(for: URL.self) { urls, _ in

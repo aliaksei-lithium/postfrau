@@ -977,3 +977,61 @@ close to the strip behind it, and unselected tabs now wash on hover too.
 slow" is about pixels changing, so measure pixels changing — not CPU (D52), not state (D53). And
 a synthetic input harness must imitate the *timing* of a hand, not just its coordinates; a click
 that is 90 ms too short hides the entire defect.
+
+## D55 — Dragging a sidebar row never worked, because the drag type was never declared
+
+`DraggedItem` uses `UTType(exportedAs: "com.postfrau.collection-item")`. That call is only half a
+declaration: the other half is a `UTExportedTypeDeclarations` entry in `Info.plist`, and there
+was none. The system therefore did not know the type, `draggable` and `dropDestination` never
+negotiated, and dragging a request did nothing at all — no error, no warning, nothing. It had
+never worked.
+
+Declared in `project.yml` (XcodeGen rewrites `Info.plist` on every `make gen`, so an edit there
+would be thrown away). `UTType.postfrauItem.isDeclared` goes from false to true, and a request can
+be dragged into a folder and back out again, the move surviving a relaunch.
+
+**This also corrects D54.** There I reported that drag-and-drop could not be tested here, because
+a synthetic `CGEvent` drag moved nothing even on a build carrying no new gesture. The control was
+right and I read it backwards: the drag was genuinely broken, not untestable. `Tools/` drives real
+drags perfectly well.
+
+**And it uncovered a real regression in D54.** With dragging fixed, the zero-duration
+`LongPressGesture` that put selection on the press turned out to stop `draggable` ever starting —
+`simultaneousGesture` included. So the press-selection is now done without any SwiftUI gesture at
+all: `PressToSelect` installs a local event monitor, hands every event straight back untouched,
+and tells the `NSTableView` under the list to select the row that was pressed. The highlight is
+AppKit's own, drawn in the same pass; `List` then sets its binding on mouse-up as it always did,
+to the row that is already highlighted. Double click is `contextMenu(forSelectionType:
+primaryAction:)`, which is the list's own and so also leaves `draggable` alone. Row highlight is
+~12 ms after the press, and dragging works.
+
+**Sidebar rows also fill their row.** `RequestRow`'s content was only as wide as the request's
+name — `CollectionRow` and `FolderRow` already had a trailing `Spacer` and it did not — so
+hovering, or right-clicking, the empty space beside a short name did nothing at all.
+
+## D56 — Tabs cannot be reordered by dragging, and why not
+
+The tab strip's doc comment claimed drag reordering; there was no drag code in it, and
+`AppState.moveTab` had no caller. Adding it does not work, and the reason is worth writing down
+because five separate approaches failed the same way.
+
+The strip is a horizontal `ScrollView`, and on macOS 26 that takes horizontal mouse drags and
+does nothing with them:
+
+| approach | what happened |
+|---|---|
+| `draggable` + `dropDestination` on a tab | payload never so much as asked for — however slow or crooked the drag |
+| `highPriorityGesture(DragGesture(minimumDistance: 0))` on a tab | fires, but `translation` is exactly zero at `onEnded` |
+| the same gesture on the `ScrollView` | never fires |
+| `.scrollDisabled(true)` | gesture still never fires, and the wheel stops working too |
+| `NSEvent.addLocalMonitorForEvents` | sees the mouse going down and nothing after it: whatever tracks the drag pulls events with `nextEventMatchingMask:`, which monitors never see |
+| `NSPanGestureRecognizer` on the window's content view | never fires, exactly like the click recognizer tried in D54 |
+
+A diagonal drag *does* start `draggable`, which is what pins it on the horizontal axis rather than
+on drag-and-drop generally. Scroll-wheel events, unlike mouse drags, do reach a local monitor.
+
+So reordering needs the strip to stop being a `ScrollView` — a clipped `HStack` at an offset this
+code owns, with the wheel handled through a local monitor and scroll-into-view computed from the
+tab frames it already collects. That is a rewrite of the most-used piece of chrome in the app and
+is not something to land unverified at the end of a long session, so it is written down rather
+than half-done. `moveTab` and its persistence are already there and already correct.

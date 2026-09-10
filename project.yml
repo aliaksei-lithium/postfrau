@@ -58,6 +58,16 @@ targets:
             LSHandlerRank: Alternate
             LSItemContentTypes:
               - public.json
+        # The drag payload for sidebar rows. `UTType(exportedAs:)` in code is only half
+        # of it: without a declaration here the system does not know the type, and SwiftUI's
+        # `draggable`/`dropDestination` never negotiate — dragging silently does nothing, which
+        # is what it had been doing. See `docs/decisions.md` D55.
+        UTExportedTypeDeclarations:
+          - UTTypeIdentifier: com.postfrau.collection-item
+            UTTypeDescription: Postfrau collection item
+            UTTypeConformsTo:
+              - public.data
+            UTTypeTagSpecification: {}
         # `postfrau open <path>` sends postfrau://open?id=<uuid>. Declared here rather than in
         # Info.plist because XcodeGen regenerates that file from this block on every `make gen`.
         CFBundleURLTypes:

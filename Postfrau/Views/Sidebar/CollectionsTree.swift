@@ -302,6 +302,10 @@ struct RequestRow: View {
             } else {
                 HighlightedText(request.name, matching: state.sidebarFilter).lineLimit(1)
             }
+            // Fills the row, the way `CollectionRow` and `FolderRow` already did. Without it the
+            // content is only as wide as the name, so hovering — or right-clicking — the empty
+            // space beside a short name did nothing.
+            Spacer(minLength: 0)
         }
         // `.ignore` plus an explicit label: the row is one element that reads "GET List", rather
         // than two unnamed fragments that VoiceOver cannot make sense of.
@@ -333,10 +337,6 @@ struct RequestRow: View {
         // working. It also settles the double click without a timer: the second press
         // already carries `clickCount == 2`, so nothing waits out `NSEvent.doubleClickInterval`
         // to find out. See `docs/decisions.md` D54.
-        .simultaneousGesture(LongPressGesture(minimumDuration: 0).onEnded { _ in
-            state.sidebarSelection = request.id
-            if NSApp.currentEvent?.clickCount == 2 { state.openRequest(id: request.id) }
-        })
         .onHover { isHovering = $0 }
         .rowHover(isHovering, isSelected: isSelected)
         // No tap gesture at all: selection is the list's own again, so AppKit highlights the
