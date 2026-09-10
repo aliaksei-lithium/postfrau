@@ -1055,3 +1055,44 @@ its own and taking everything it is offered:
 
 Verified end to end: reorder by dragging, order kept across a relaunch, wheel scrolling both ways,
 a newly opened tab scrolled into view, click to select, double click to rename, and "+".
+
+## D57 — Secrets go to the data folder by default, and the Keychain is the option
+
+Secrets lived in the Keychain, and the data folder held a blank where the value would be. That is
+the safer arrangement and it stays available — but it was costing a password prompt on every
+build, and the reason is not fixable from inside the app.
+
+**Why the prompts.** The Keychain ties an item's "Always Allow" to the application's *code
+signature*. Postfrau is ad-hoc signed — `Signature=adhoc`, and `security find-identity` reports
+`0 valid identities found` on the machine it is built on — so every build is a different
+application as far as macOS is concerned, and the permission granted to the last one does not
+carry over. Two prompts rather than one because read and write are authorised separately: the
+launch hydrate is one, and `persist` rewriting every secret on any environment edit was the other.
+That second one was waste and is now gone — `persist` writes only what changed.
+
+**What was chosen.** `AppSettings.secretStorage`, defaulting to `.dataFolder`, with `.keychain`
+still there in Settings ▸ Data. The trade-off is stated in the pane rather than buried: in the
+data folder the values sit in plain text next to everything else, so whatever can read the folder
+— a sync client, a backup, a repository it gets committed to — can read them. That is a real
+downgrade, and it was the user's call to make; it is theirs to see too, which is why the sentence
+sits under the picker in orange rather than in a footnote.
+
+**How the value is kept out of files that should not have it.** `Variable.encode` still blanks a
+secret by default; writing the real value is opt-in through
+`CodingUserInfoKey.includeSecretValues`, which only `WorkspaceStore` sets, and only when the
+setting says data folder. `WorkspaceStore` itself defaults to blanking, so a caller that never
+mentions secrets behaves exactly as it always did — the first version of this had it the other way
+round and `secretValuesNeverReachTheDataFolder` caught it. Exports do their own blanking and are untouched — an exported
+environment is exactly the kind of thing that gets pasted into a ticket. Any encoding path added
+later is therefore safe unless it deliberately asks not to be.
+
+**Migration.** Switching the setting in Settings moves what is already stored, both directions.
+A workspace upgrading into the new default is handled at load: a secret the folder has no value
+for must still be in the Keychain, so it is read once and written into the folder. That is the one
+prompt such a workspace sees. The implicit path does not delete the Keychain copies — a launch
+that quietly destroys things is not a launch anyone wants — while the explicit switch does.
+
+**The alternative not taken.** A stable self-signed certificate would end the prompts without
+giving up the Keychain, and `Scripts/release.sh` already honours `CODESIGN_IDENTITY`. It needs a
+certificate in the login keychain, which is a change to the machine rather than to this
+repository, so it is offered rather than done.

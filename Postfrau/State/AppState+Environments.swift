@@ -112,6 +112,9 @@ extension AppState {
     /// Failures are surfaced as a status message rather than thrown: a locked Keychain should not
     /// block editing, and the variable is still usable for the rest of the session.
     private func persistSecrets(variables: [Variable], previous: [Variable], scope: UUID) {
+        // Nothing to do when secrets live in the data folder: the value is written with the rest
+        // of the environment by the ordinary autosave.
+        guard settings.secretStorage == .keychain else { return }
         guard variables.contains(where: \.isSecret) || previous.contains(where: \.isSecret)
         else { return }
         let store = secretsStore
@@ -124,19 +127,106 @@ extension AppState {
         }
     }
 
-    /// Fills in every secret value from the Keychain. Called once after the workspace loads.
+    /// Fills in secret values that the data folder does not already carry. Called once after the
+    /// workspace loads.
+    ///
+    /// In Keychain mode that is every secret, since the files hold blanks. In data-folder mode it
+    /// is normally none — but a workspace that used to keep its secrets in the Keychain still has
+    /// blanks in its files, and reading them once here moves them across. That is the one prompt
+    /// such a workspace sees; after the next save the values are in the folder and the Keychain is
+    /// never touched again. The Keychain copies are left alone rather than deleted: this runs by
+    /// itself at launch, and deleting things by itself is not something a launch should do. The
+    /// switch in Settings does remove them.
     func loadSecrets() async {
         let store = secretsStore
+        var migrated = false
+
         for index in workspace.environments.indices {
             let environment = workspace.environments[index]
-            guard environment.variables.contains(where: \.isSecret) else { continue }
+            guard needsHydrating(environment.variables) else { continue }
             workspace.environments[index].variables = await store.hydrate(
                 environment.variables, scope: environment.id)
+            if settings.secretStorage == .dataFolder {
+                markDirty(environment: environment.id)
+                migrated = true
+            }
         }
-        if workspace.globals.variables.contains(where: \.isSecret) {
+        if needsHydrating(workspace.globals.variables) {
             workspace.globals.variables = await store.hydrate(
                 workspace.globals.variables, scope: SecretsStore.globalsScope)
+            if settings.secretStorage == .dataFolder {
+                markGlobalsDirty()
+                migrated = true
+            }
         }
+        if migrated { saveState = .saving }
+    }
+
+    /// Whether anything here has to be fetched from the Keychain.
+    private func needsHydrating(_ variables: [Variable]) -> Bool {
+        switch settings.secretStorage {
+        case .keychain:
+            variables.contains(where: \.isSecret)
+        case .dataFolder:
+            // Only a secret the folder has no value for, which means it predates the switch.
+            variables.contains { $0.isSecret && !$0.key.isEmpty && $0.value.isEmpty }
+        }
+    }
+
+    /// Moves every secret between the Keychain and the data folder.
+    ///
+    /// Both directions read the values into memory first, then write them where they now belong;
+    /// the workspace files are rewritten by the ordinary autosave, with or without the values
+    /// depending on the new setting.
+    func setSecretStorage(_ storage: SecretStorage) async {
+        guard storage != settings.secretStorage else { return }
+        let store = secretsStore
+
+        // Whatever the direction, memory has to hold the real values before anything moves.
+        if settings.secretStorage == .keychain {
+            for index in workspace.environments.indices
+            where workspace.environments[index].variables.contains(where: \.isSecret) {
+                workspace.environments[index].variables = await store.hydrate(
+                    workspace.environments[index].variables,
+                    scope: workspace.environments[index].id)
+            }
+            if workspace.globals.variables.contains(where: \.isSecret) {
+                workspace.globals.variables = await store.hydrate(
+                    workspace.globals.variables, scope: SecretsStore.globalsScope)
+            }
+        }
+
+        settings.secretStorage = storage
+        markSettingsDirty()
+        await self.store.setWritesSecretValues(storage == .dataFolder)
+
+        switch storage {
+        case .keychain:
+            for environment in workspace.environments {
+                persistSecrets(for: environment)
+            }
+            persistSecrets(
+                variables: workspace.globals.variables, previous: [],
+                scope: SecretsStore.globalsScope)
+        case .dataFolder:
+            // The values are in memory and about to be written to the folder, so the Keychain
+            // copies are no longer the record of anything.
+            for environment in workspace.environments {
+                let keys = environment.variables.filter(\.isSecret).map(\.key)
+                if !keys.isEmpty { await store.deleteAll(in: environment.id, keys: keys) }
+            }
+            let globalKeys = workspace.globals.variables.filter(\.isSecret).map(\.key)
+            if !globalKeys.isEmpty {
+                await store.deleteAll(in: SecretsStore.globalsScope, keys: globalKeys)
+            }
+        }
+
+        // Every file that holds a secret has to be rewritten, with the value or without it.
+        for environment in workspace.environments
+        where environment.variables.contains(where: \.isSecret) {
+            markDirty(environment: environment.id)
+        }
+        if workspace.globals.variables.contains(where: \.isSecret) { markGlobalsDirty() }
     }
 
     /// Moves every stored secret to or from iCloud Keychain.

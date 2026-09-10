@@ -276,6 +276,8 @@ final class AppState {
         // The UI state is restored *before* the sample collection is installed: `restore` replaces
         // the expansion set wholesale, so installing first would silently discard the sample's
         // "start expanded" flag.
+        // Before anything is written: the store blanks secrets on encode unless told otherwise.
+        await store.setWritesSecretValues(settings.secretStorage == .dataFolder)
         await loadSecrets()
 
         let uiState = await store.loadUIState()

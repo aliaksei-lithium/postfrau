@@ -4,6 +4,36 @@ import Testing
 
 @Suite("Model coding")
 struct ModelCodingTests {
+    @Test("A secret's value is blanked unless the encoder asks for it")
+    func secretValuesAreOptOut() throws {
+        let secret = Variable(key: "token", value: "abc", isSecret: true)
+        let plain = Variable(key: "baseUrl", value: "https://example.com")
+
+        // The default, which is what exports and every other encoding path get.
+        let blanked = try JSONSerialization.jsonObject(
+            with: Postfrau.makeEncoder().encode([secret, plain])) as! [[String: Any]]
+        #expect(blanked[0]["value"] as? String == "")
+        #expect(blanked[0]["isSecret"] as? Bool == true, "it is still marked secret")
+        #expect(blanked[1]["value"] as? String == "https://example.com")
+
+        // Asked for: only the workspace store does this, and only when secrets live in the folder.
+        let encoder = Postfrau.makeEncoder()
+        encoder.userInfo[.includeSecretValues] = true
+        let kept = try JSONSerialization.jsonObject(
+            with: encoder.encode([secret, plain])) as! [[String: Any]]
+        #expect(kept[0]["value"] as? String == "abc")
+    }
+
+    @Test("Secrets go to the data folder by default")
+    func defaultStorageIsTheDataFolder() throws {
+        #expect(AppSettings().secretStorage == .dataFolder)
+        // An older settings file has no such key and must not be read as something else.
+        let older = Data(#"{"editorFontSize": 13}"#.utf8)
+        let decoded = try Postfrau.makeDecoder().decode(AppSettings.self, from: older)
+        #expect(decoded.secretStorage == .dataFolder)
+        #expect(decoded.editorFontSize == 13)
+    }
+
     @Test func httpMethodRoundTripsIncludingCustomVerbs() throws {
         for method in HTTPMethod.allCases {
             #expect(try roundTrip(method) == method)

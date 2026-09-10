@@ -32,6 +32,12 @@ public actor WorkspaceStore {
     }
 
     private var dataFolder: DataFolder
+    /// Whether secret values are written into the workspace files.
+    ///
+    /// Off until something says otherwise, which is the safe way round: a caller that forgets to
+    /// set it blanks secrets, as this store always used to, rather than writing them out. The app
+    /// and the command line tool both set it the moment they have read the settings.
+    private var writesSecretValues = false
     private let localRoot: URL
     private var fingerprints: [String: FileFingerprint] = [:]
 
@@ -233,8 +239,17 @@ public actor WorkspaceStore {
         return value
     }
 
+    /// Tells the store where secrets are kept, so it knows whether to write their values.
+    public func setWritesSecretValues(_ writes: Bool) { writesSecretValues = writes }
+
+    private func documentEncoder() -> JSONEncoder {
+        let encoder = Postfrau.makeEncoder()
+        encoder.userInfo[.includeSecretValues] = writesSecretValues
+        return encoder
+    }
+
     private func write<T: Encodable>(_ value: T, to url: URL, revision: Int) throws {
-        let data = try Postfrau.makeEncoder().encode(value)
+        let data = try documentEncoder().encode(value)
         try AtomicFile.write(data, to: url, coordinated: dataFolder.needsCoordination)
         fingerprints[url.standardizedFileURL.path] =
             try AtomicFile.fingerprint(of: url, data: data, revision: revision)

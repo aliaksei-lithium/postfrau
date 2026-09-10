@@ -28,6 +28,35 @@ public enum Appearance: String, Sendable, Hashable, Codable, CaseIterable {
     }
 }
 
+/// Where a secret variable's value is kept.
+public enum SecretStorage: String, Sendable, Hashable, Codable, CaseIterable, Identifiable {
+    /// Beside the rest of the workspace, in plain text.
+    case dataFolder
+    /// In the login Keychain. The data folder holds a blank where the value would be.
+    case keychain
+
+    public var id: Self { self }
+
+    public var displayName: String {
+        switch self {
+        case .dataFolder: "Data Folder"
+        case .keychain: "Keychain"
+        }
+    }
+
+    public var explanation: String {
+        switch self {
+        case .dataFolder:
+            "Secrets are stored in plain text with the rest of the workspace. Anything that can "
+                + "read the folder — a sync service, a backup, a repository it is committed to — "
+                + "can read them."
+        case .keychain:
+            "Secrets are stored in the login Keychain and never written to the data folder. "
+                + "macOS asks for permission the first time each build reads them."
+        }
+    }
+}
+
 /// Machine-local preferences. Written to `settings.json` in the local state folder; never synced.
 ///
 /// That is what makes `appearance` work the way people expect: light on the laptop and dark on the
@@ -38,6 +67,10 @@ public struct AppSettings: Sendable, Hashable, Codable {
     /// Last known path of that folder, shown in Settings even when the bookmark is stale.
     public var dataFolderPath: String?
     public var syncSecretsViaICloudKeychain: Bool
+    /// Where secret variables' values are kept. The data folder by default: the Keychain ties its
+    /// permission to the app's code signature, so a build without a stable signing identity is a
+    /// new application every time and has to ask again. See `docs/decisions.md` D57.
+    public var secretStorage: SecretStorage
     /// Light, dark, or whatever the system is doing.
     public var appearance: Appearance
     public var editorFontSize: Double
@@ -68,6 +101,7 @@ public struct AppSettings: Sendable, Hashable, Codable {
         dataFolderBookmark: Data? = nil,
         dataFolderPath: String? = nil,
         syncSecretsViaICloudKeychain: Bool = false,
+        secretStorage: SecretStorage = .dataFolder,
         appearance: Appearance = .system,
         editorFontSize: Double = 12,
         responseLayout: ResponseLayout = .vertical,
@@ -86,6 +120,7 @@ public struct AppSettings: Sendable, Hashable, Codable {
         self.dataFolderBookmark = dataFolderBookmark
         self.dataFolderPath = dataFolderPath
         self.syncSecretsViaICloudKeychain = syncSecretsViaICloudKeychain
+        self.secretStorage = secretStorage
         self.appearance = appearance
         self.editorFontSize = editorFontSize
         self.responseLayout = responseLayout
@@ -104,6 +139,7 @@ public struct AppSettings: Sendable, Hashable, Codable {
 
     private enum CodingKeys: String, CodingKey {
         case schemaVersion, dataFolderBookmark, dataFolderPath, syncSecretsViaICloudKeychain
+        case secretStorage
         case appearance
         case editorFontSize, responseLayout, defaultTimeoutSeconds, defaultVerifyTLS
         case maxHistoryEntries, allowPreviewJavaScript, wrapResponseLines, showResponseLineNumbers
@@ -118,6 +154,7 @@ public struct AppSettings: Sendable, Hashable, Codable {
         dataFolderPath = try c.decodeIfPresent(String.self, forKey: .dataFolderPath)
         syncSecretsViaICloudKeychain =
             try c.decodeIfPresent(Bool.self, forKey: .syncSecretsViaICloudKeychain) ?? d.syncSecretsViaICloudKeychain
+        secretStorage = try c.decodeIfPresent(SecretStorage.self, forKey: .secretStorage) ?? d.secretStorage
         appearance = try c.decodeIfPresent(Appearance.self, forKey: .appearance) ?? d.appearance
         editorFontSize = try c.decodeIfPresent(Double.self, forKey: .editorFontSize) ?? d.editorFontSize
         responseLayout = try c.decodeIfPresent(ResponseLayout.self, forKey: .responseLayout) ?? d.responseLayout

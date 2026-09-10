@@ -70,7 +70,19 @@ struct DataSettings: View {
             }
 
             Section {
-                Toggle("Sync secrets via iCloud Keychain", isOn: iCloudKeychain)
+                Picker("Keep secrets in", selection: secretStorage) {
+                    ForEach(SecretStorage.allCases) { storage in
+                        Text(storage.displayName).tag(storage)
+                    }
+                }
+                Text(state.settings.secretStorage.explanation)
+                    .font(.callout)
+                    .foregroundStyle(
+                        state.settings.secretStorage == .dataFolder ? .orange : .secondary)
+
+                if state.settings.secretStorage == .keychain {
+                    Toggle("Sync secrets via iCloud Keychain", isOn: iCloudKeychain)
+                }
                 if let error = state.secretsError {
                     Text(error).font(.callout).foregroundStyle(.orange)
                 }
@@ -78,8 +90,10 @@ struct DataSettings: View {
                 Text("Secrets")
             } footer: {
                 Text(
-                    "Secret values are never written to the data folder. With this off they stay "
-                        + "in this Mac's keychain, and a second Mac shows them as empty.")
+                    "Changing this moves the secrets you already have. The Keychain ties its "
+                        + "permission to the app's signature, so an unsigned build has to ask "
+                        + "again after every update; the data folder never asks, and pays for it "
+                        + "by holding the values in the clear.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
             }
@@ -124,6 +138,12 @@ struct DataSettings: View {
                 isRelocating = false
             }
         }
+    }
+
+    private var secretStorage: Binding<SecretStorage> {
+        Binding(
+            get: { state.settings.secretStorage },
+            set: { storage in Task { await state.setSecretStorage(storage) } })
     }
 
     private var iCloudKeychain: Binding<Bool> {

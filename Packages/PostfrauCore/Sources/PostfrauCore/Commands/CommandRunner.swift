@@ -80,6 +80,9 @@ public actor CommandRunner {
     public func load() async throws -> Workspace {
         guard !isLoaded else { return workspace }
         settings = await store.loadSettings()
+        // Keeps the tool from writing a secret's value into the folder when the app is keeping
+        // secrets in the Keychain — and from blanking one when it is not.
+        await store.setWritesSecretValues(settings.secretStorage == .dataFolder)
 
         let folder = await store.folder.refreshingStatus()
         guard folder.status == .ok else {

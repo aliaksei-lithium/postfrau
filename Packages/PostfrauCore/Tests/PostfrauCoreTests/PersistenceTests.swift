@@ -12,6 +12,42 @@ struct WorkspaceStoreTests {
         return (WorkspaceStore(dataFolder: folder, localRoot: localRoot), folder, localRoot)
     }
 
+
+    @Test("Where a secret's value ends up depends on the setting, and only on that")
+    func secretValueFollowsTheStorageSetting() async throws {
+        let temp = TempDirectory()
+        let (store, folder, _) = makeStore(temp)
+        var environment = RequestEnvironment(name: "Staging")
+        environment.variables = [
+            Variable(key: "token", value: "sh-abc", isSecret: true),
+            Variable(key: "baseUrl", value: "https://example.com"),
+        ]
+
+        func tokenOnDisk() throws -> String {
+            let file = folder.root
+                .appending(path: "environments", directoryHint: .isDirectory)
+                .appending(path: "\(environment.id.uuidString).json", directoryHint: .notDirectory)
+            let decoded = try Postfrau.makeDecoder()
+                .decode(RequestEnvironment.self, from: Data(contentsOf: file))
+            return decoded.variables.first { $0.key == "token" }?.value ?? "(missing)"
+        }
+
+        // Keychain mode: the folder gets a blank where the value would be.
+        await store.setWritesSecretValues(false)
+        _ = try await store.save(environment: environment)
+        #expect(try tokenOnDisk() == "")
+
+        // Data-folder mode: the value is written with everything else.
+        await store.setWritesSecretValues(true)
+        _ = try await store.save(environment: environment)
+        #expect(try tokenOnDisk() == "sh-abc")
+
+        // And back again, so switching does not strand the value in the file.
+        await store.setWritesSecretValues(false)
+        _ = try await store.save(environment: environment)
+        #expect(try tokenOnDisk() == "")
+    }
+
     @Test func loadingAnEmptyFolderCreatesTheLayoutAndMarker() async throws {
         let temp = TempDirectory()
         let (store, folder, _) = makeStore(temp)
@@ -100,6 +136,8 @@ struct WorkspaceStoreTests {
         try await store.delete(collectionID: UUID())
     }
 
+    /// The default, which is what a caller that never mentions secrets gets. Writing them out is
+    /// opt-in — see `setWritesSecretValues` and `secretValueFollowsTheStorageSetting`.
     @Test func secretValuesNeverReachTheDataFolder() async throws {
         let temp = TempDirectory()
         let (store, folder, _) = makeStore(temp)
