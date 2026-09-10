@@ -1124,3 +1124,44 @@ behaviour while `makeState` was handing them the new default, so they were asser
 app no longer does by default. Fixed where the fault was, by making those tests ask for
 `.keychain` explicitly, plus a new one that pins the other half: in data-folder mode nothing
 reaches the Keychain at all.
+
+## D59 — `find` ranks instead of filtering, and a dead end got directions
+
+An agent was given "fetch transaction data for FDA_611_251_328_071 in BIPS Env context" and could
+not carry it out. Four separate things were in the way, none of them the model or the network.
+
+**`find` required every word, and one word was a fragment of another.** `find transaction data`
+returned exactly one request — "Materialize monthly interest amounts from INTEREST_BOOKING
+transactions" — whose only claim to "data" was the word **data**base, in a paragraph about
+something else. The request actually called "Find all transactions for a deposit" was not in the
+results at all, because "data" does not appear in it. A single confident wrong answer is worse
+than ten to choose between: there is nothing in the output to suggest anything is missing.
+
+It now scores rather than filters. Each word counts once, wherever it does best, and where it
+matches decides how much: a whole word in the name (10) beats the start of one (8), which beats a
+fragment buried in a description (1). "transaction" and "transactions" are the same word — nothing
+cleverer than a trailing `s`, because a real stemmer makes the rule unpredictable and predictable
+is what something choosing a request to fire at production needs. `find transactions deposit` now
+puts the right request first; `find transaction data` lists it third, with its description.
+
+**The path — the one part of the output meant to be used rather than read — was clipped to 64
+characters.** A path with a `…` in the middle looks copyable and is not. Paths are now printed
+whole, on their own line, with the description under them: a table wide enough for a hundred-odd
+character path wraps in any real terminal, and the wrapping is what made it unreadable. Two lines
+follow the results with the exact `get` and `run` commands for the first one.
+
+**An unreadable data folder said only that it was unreadable.** That is the sandbox case, which is
+the case this matters most in, and the way out already existed — D48's loopback API — but nothing
+in the failure mentioned it. The error now names the setting to turn on, the variable to export,
+and which verbs work that way. Verified end to end: with the folder unreachable, `find`, `get` and
+a real `run` all work through the app.
+
+**And every command warned about a Keychain secret it never needed.** `find` hydrates the
+workspace like everything else, so a missing secret was reported after a search that could not
+have used one — noise in front of the answer, and to something reading the output it looks like
+the search went wrong. The warning is now kept for the verbs whose result actually depends on the
+value.
+
+**Also.** `get` printed an imported OpenAPI description raw, which for this API is a page of HTML
+role tables — burying `unresolved deposit_id`, the line that says what the caller has to supply.
+Tags are stripped and the text clipped to a line; `--json` still carries all of it.

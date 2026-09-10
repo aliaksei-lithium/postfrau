@@ -74,9 +74,23 @@ enum CLI {
         // Everything else needs the workspace.
         let resolved = Configuration.resolve(dataDirectory: parsed.value("--data-dir"))
         guard resolved.dataFolder.status == .ok else {
+            // Saying only that it failed leaves a sandboxed caller — which is the common way to
+            // land here — with nowhere to go. The way out is the running app, so say so here
+            // rather than only in the skill.
             out.error(
                 "the data folder at \(resolved.dataFolder.root.path) is not available "
                     + "(chosen from \(resolved.origin)).")
+            out.print("")
+            out.print(
+                "If this process cannot read that folder — a sandbox, or another user's "
+                    + "session — ask the running app instead. In Postfrau, turn on "
+                    + "Settings ▸ Advanced ▸ Local API, then:")
+            out.print("")
+            out.print("    export \(LocalAPI.tokenVariable)=<the token shown in that pane>")
+            out.print("")
+            out.print(
+                "`" + RemoteAPI.supportedVerbs.sorted().joined(separator: "`, `")
+                    + "` then work without touching the folder at all.")
             return .dataFolderUnavailable
         }
 
@@ -98,7 +112,7 @@ enum CLI {
 
         do {
             let code = try await dispatch(verb, parsed, runner, resolved, out)
-            await reportUnavailableSecrets(runner, out)
+            await reportUnavailableSecrets(runner, out, verb: verb)
             return code
         } catch let error as CommandRunner.CommandError {
             out.error(CommandRunner.message(for: error))
@@ -113,11 +127,19 @@ enum CLI {
         }
     }
 
+    /// The verbs whose output depends on a secret actually having a value.
+    ///
+    /// Every command hydrates the workspace, so a missing secret is noticed whatever was asked
+    /// for — but warning about a token while listing or searching is noise in front of the answer,
+    /// and to an agent reading the output it looks like something went wrong with the search.
+    private static let verbsThatUseSecrets: Set<String> = ["get", "run", "send", "env"]
+
     /// Says once, at the end, that a secret could not be supplied — rather than letting the user
     /// puzzle over a request that went out with an empty token.
     private static func reportUnavailableSecrets(
-        _ runner: CommandRunner, _ out: Output
+        _ runner: CommandRunner, _ out: Output, verb: String
     ) async {
+        guard verbsThatUseSecrets.contains(verb) else { return }
         let missing = Set(await runner.unavailableSecrets).sorted()
         guard !missing.isEmpty else { return }
         out.warning(

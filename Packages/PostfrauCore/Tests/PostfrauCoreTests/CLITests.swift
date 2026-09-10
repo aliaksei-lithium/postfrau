@@ -308,6 +308,59 @@ struct CLITests {
         #expect(try run(["validate", rubbish.path], in: temp.url).code != 0)
     }
 
+    @Test("find prints paths whole, because they are what you type next")
+    func findPrintsUsablePaths() throws {
+        let temp = TempDirectory()
+        try prepared(temp.url)
+        let long = "A collection with quite a long name/A folder nested inside it/"
+            + "Find all transactions for a deposit account"
+        try run(["add", "A collection with quite a long name", "--collection"], in: temp.url)
+        try run(
+            ["add", "A collection with quite a long name", "--folder",
+             "--name", "A folder nested inside it"], in: temp.url)
+        try run(
+            ["add", "A collection with quite a long name/A folder nested inside it",
+             "--url", "https://api.test/transactions",
+             "--name", "Find all transactions for a deposit account"], in: temp.url)
+
+        let found = try run(["find", "transactions"], in: temp.url)
+        #expect(found.code == 0)
+        #expect(
+            found.stdout.contains(long),
+            "the whole path has to be printed — a clipped one looks copyable and is not")
+        // And it says what to do with it, so a caller that has never run this before does not
+        // have to infer the next command.
+        #expect(found.stdout.contains("postfrau get '\(long)'"))
+    }
+
+    @Test("An unreadable data folder explains the way round it")
+    func unreadableFolderPointsAtTheLocalAPI() throws {
+        let temp = TempDirectory()
+        let result = try run(
+            ["find", "anything", "--data-dir", "/nonexistent/postfrau/folder"], in: temp.url)
+        #expect(result.code == 5)
+        let said = result.stdout + result.stderr
+        #expect(said.contains("not available"))
+        // The point: a sandboxed caller is told where to go, not just that it failed.
+        #expect(said.contains("POSTFRAU_API_TOKEN"))
+        #expect(said.contains("Local API"))
+    }
+
+    @Test("Searching does not warn about secrets it never needed")
+    func findDoesNotWarnAboutSecrets() throws {
+        let temp = TempDirectory()
+        try prepared(temp.url)
+        try run(["add", "Acme", "--collection"], in: temp.url)
+        try run(["add", "Acme", "--url", "https://api.test/x", "--name", "Thing"], in: temp.url)
+        try run(["env", "add", "Prod"], in: temp.url)
+        try run(["env", "set", "Prod", "token=abc", "--secret"], in: temp.url)
+        try run(["env", "use", "Prod"], in: temp.url)
+
+        let found = try run(["find", "thing"], in: temp.url)
+        #expect(!found.stderr.contains("no value for"), "a search needs no secret")
+        #expect(!found.stdout.contains("no value for"))
+    }
+
     @Test func skillInstallWritesTheDocumentAnAgentReads() throws {
         let temp = TempDirectory()
         try prepared(temp.url)

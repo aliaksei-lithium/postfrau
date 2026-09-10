@@ -88,11 +88,44 @@ struct CommandRunnerTests {
         #expect(try await runner.find("force projections").first?.name == "Backfill")
     }
 
-    @Test func findReturnsNothingWhenAWordIsMissing() async throws {
+    @Test func findRanksRatherThanRequiringEveryWord() async throws {
         let temp = TempDirectory()
         let runner = try await makeRunner(at: temp.url)
-        // "list" exists, "zzzz" does not, and every word has to match.
-        #expect(try await runner.find("list zzzzqqq").isEmpty)
+        // One word nobody could match no longer throws the answer away. Somebody asking in
+        // sentences will always include a word that is in no request anywhere.
+        #expect(try await runner.find("list zzzzqqq").first?.name == "List")
+    }
+
+    /// The bug this ranking replaced.
+    ///
+    /// `find transaction data` used to return exactly one request — one whose only claim was the
+    /// word "database" buried in a paragraph about something else — while the request actually
+    /// named "Find all transactions" was not listed at all, because "data" did not appear in it.
+    /// One confident wrong answer is worse than several to choose between.
+    @Test func aFragmentOfAnotherWordCannotBeatARealMatch() async throws {
+        let temp = TempDirectory()
+        let folder = DataFolder(root: temp.url.appending(path: "Data"), needsCoordination: false)
+        try folder.prepare()
+        let store = WorkspaceStore(dataFolder: folder, localRoot: temp.url)
+
+        var wanted = RequestItem(name: "Find all transactions", url: "https://api.test/tx")
+        wanted.description = "Return list of transactions per deposit"
+        var decoy = RequestItem(name: "Materialize monthly interest", url: "https://api.test/m")
+        decoy.description = "Verify completion via logs or the database before continuing."
+
+        var collection = RequestCollection(name: "Deposits")
+        collection.items = [.request(decoy), .request(wanted)]
+        try await store.save(collection: collection)
+        let runner = CommandRunner(
+            store: store, history: HistoryStore(root: temp.url.appending(path: "history")))
+
+        let results = try await runner.find("transaction data")
+        #expect(
+            results.contains { $0.name == "Find all transactions" },
+            "the request the words are actually about must be in the results")
+        #expect(
+            results.first?.name == "Find all transactions",
+            "a whole word in the name beats a fragment inside another word in a description")
     }
 
     @Test func findRespectsItsLimit() async throws {

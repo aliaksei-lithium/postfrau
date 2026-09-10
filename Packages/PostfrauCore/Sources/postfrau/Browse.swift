@@ -65,11 +65,53 @@ enum Browse {
             out.print("nothing matched")
             return .notFound
         }
-        out.table(found.map { item in
-            [out.method(item.method), oneLine(item.path, 64),
-             out.dim(oneLine(item.description ?? item.url, 60))]
-        })
+        // Two lines per result, rather than three columns.
+        //
+        // The path is printed whole, however long it is: it is the one thing here that is not for
+        // reading but for *using*, and a path with a `…` in the middle looks like something you
+        // could copy when it is not. Paths in an imported spec run past a hundred characters, so
+        // a table wide enough for them wraps in any real terminal and the wrapping is what makes
+        // the output unreadable. On its own line it never wraps, and the description sits under
+        // it where it can be clipped without costing anything.
+        // Padded to the widest verb so the paths start in one column and can be read down.
+        let verbWidth = found.map(\.method.count).max() ?? 0
+        for item in found {
+            let pad = String(repeating: " ", count: verbWidth - item.method.count)
+            out.print("\(out.method(item.method))\(pad)  \(item.path)")
+            if let note = item.description ?? Optional(item.url), !note.isEmpty {
+                out.print(out.dim("      " + oneLine(note, 96)))
+            }
+        }
+        // What to do with what was just printed. An agent that has never run this tool before
+        // should not have to infer the next command, and a person loses one line.
+        if let first = found.first {
+            out.print("")
+            out.print(out.dim("open:  postfrau get '\(first.path)'"))
+            out.print(out.dim("send:  postfrau run '\(first.path)' --as <your name>"))
+        }
         return .ok
+    }
+
+    /// One readable line out of a description that may be a page of HTML.
+    ///
+    /// Tags are dropped rather than rendered, entities left alone: this is a signpost, not a
+    /// document viewer, and anything wanting the real text should be reading `--json`.
+    private static func summarize(_ text: String, limit: Int = 160) -> String {
+        var stripped = ""
+        var insideTag = false
+        for character in text {
+            switch character {
+            case "<": insideTag = true
+            case ">": insideTag = false
+            default: if !insideTag { stripped.append(character) }
+            }
+        }
+        let flattened = stripped
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        return flattened.count <= limit ? flattened : flattened.prefix(limit - 1) + "…"
     }
 
     /// First line, clipped.
@@ -111,7 +153,11 @@ enum Browse {
         }
         out.print("auth       \(detail.auth)")
         if let description = detail.description, !description.isEmpty {
-            out.print("about      \(description)")
+            // Flattened and clipped. An imported OpenAPI `description` is routinely a page of
+            // HTML — role tables, notes, markup — and printing it raw buries the two lines that
+            // matter underneath, including the list of unresolved variables. `--json` still
+            // carries the whole thing.
+            out.print("about      \(summarize(description))")
         }
 
         if !detail.headers.isEmpty {

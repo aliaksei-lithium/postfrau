@@ -63,7 +63,7 @@ postfrau env use prod_deu                              # or pass --env per comma
 
 ```bash
 # Look
-postfrau find WORDS [--limit N]        # search names, paths, descriptions, URLs
+postfrau find WORDS [--limit N]        # ranked: names, paths, descriptions, URLs
 postfrau ls [path] [--tree]            # structure, not search
 postfrau get <path> [--var k=v]        # one request, stored + resolved
 
@@ -145,8 +145,8 @@ after it. No match exits 2; the request itself still succeeded.
 
 ## In a sandbox that cannot read the files
 
-If the collections folder or `~/Library/Containers` is unreadable, `--data-dir` will not help.
-Ask the running app instead:
+If the collections folder or `~/Library/Containers` is unreadable, `--data-dir` will not help —
+the tool says so and points here. Ask the running app instead:
 
 ```bash
 export POSTFRAU_API_TOKEN=<Settings ▸ Advanced ▸ Local API>
@@ -166,5 +166,5 @@ check that switch — do not copy their files somewhere readable.
 - Exit 5 — folder unavailable. Unreadable rather than wrong? Use the local API above.
 - A secret that will not resolve is usually an unanswered Keychain prompt: pass
   `POSTFRAU_SECRET_<KEY>=value` in the environment for that one command.
-- `find` returns nothing (exit 2) when not every word matches. Drop a word rather than guessing a
-  path.
+- `find` ranks; it does not require every word. The best match is first, so read the descriptions
+  before picking. Nothing at all (exit 2) means try fewer or different words — never guess a path.

@@ -125,15 +125,23 @@ extension CommandRunner {
 
     // MARK: - find
 
-    /// Every request whose name, path, description, method or URL matches every word of `query`.
+    /// The requests that best match `query`, most relevant first.
     ///
     /// This is how anything without the workspace in front of it finds a request: an agent is
-    /// told "run the projection recovery", not given a path. Words are matched independently and
-    /// in any order, so "recovery projection" finds `Projections/Force recovery`.
+    /// told "fetch the transaction data for FDA_…", not given a path. So the words arrive as a
+    /// person would say them, and some of them will be wrong.
     ///
-    /// Substrings, not fuzzy matching, when a substring hits: an agent picking a request to fire
-    /// at production wants a predictable rule, not the closest thing by edit distance. Fuzzy
-    /// ranking is the fallback for when nothing matches literally, which is where a typo lands.
+    /// It ranks rather than filters. Requiring every word to appear somewhere meant one stray
+    /// word could throw away the right answer entirely — and worse, could leave a single wrong
+    /// one looking authoritative: `find transaction data` used to return exactly one request,
+    /// which matched only because "data" appears inside the word "database" in a paragraph about
+    /// something else, while the request actually called "Find all transactions for a deposit"
+    /// was not listed at all. One confident wrong answer is worse than ten to choose between.
+    ///
+    /// Where a word matches decides how much it counts: a whole word in the name beats a prefix,
+    /// which beats a fragment buried in a description. Substrings still match, so a partial word
+    /// finds something, but they cannot outweigh a real hit. Nothing matching at all falls back to
+    /// fuzzy ranking, which is where a typo lands.
     public func find(_ query: String, limit: Int = 20) async throws -> [FoundItem] {
         let workspace = try await load()
         let terms = query.lowercased().split(separator: " ").map(String.init).filter { !$0.isEmpty }
@@ -146,22 +154,70 @@ extension CommandRunner {
                 into: &candidates)
         }
 
-        var matched: [(FoundItem, Int)] = []
-        for candidate in candidates
-        where terms.allSatisfy({ candidate.haystack.contains($0) }) {
-            matched.append((candidate.item, candidate.score))
-        }
-
-        if matched.isEmpty {
-            // Nothing matched literally, so fall back to ranking the whole haystack fuzzily.
+        let ranked = candidates
+            .map { ($0.item, Self.relevance(of: $0.item, to: terms)) }
+            .filter { $0.1 > 0 }
+        if ranked.isEmpty {
+            // Nothing matched even loosely, so rank the whole haystack fuzzily instead.
             return FuzzyMatcher.rank(candidates, query: query) { $0.haystack }
                 .prefix(limit)
                 .map { $0.item.item }
         }
-        return matched
-            .sorted { $0.1 == $1.1 ? $0.0.path < $1.0.path : $0.1 > $1.1 }
+        return ranked
+            .sorted {
+                if $0.1 != $1.1 { return $0.1 > $1.1 }
+                // A shorter name for the same score is the more specific request.
+                if $0.0.name.count != $1.0.name.count { return $0.0.name.count < $1.0.name.count }
+                return $0.0.path < $1.0.path
+            }
             .prefix(limit)
             .map(\.0)
+    }
+
+    /// How well one request answers `terms`. Zero means it does not.
+    ///
+    /// Each term scores once, wherever it does best; the total is their sum. A request matching
+    /// two terms weakly can therefore still lose to one matching a single term in its name, which
+    /// is the intended order — the name is what somebody is naming when they ask for something.
+    static func relevance(of item: FoundItem, to terms: [String]) -> Int {
+        let folders = item.path.hasSuffix(item.name)
+            ? String(item.path.dropLast(item.name.count))
+            : item.path
+
+        var total = 0
+        for term in terms {
+            let best = max(
+                weight(term, in: item.name, whole: 10, prefix: 8, fragment: 4),
+                max(
+                    weight(term, in: folders, whole: 5, prefix: 4, fragment: 2),
+                    max(
+                        weight(term, in: item.description ?? "", whole: 3, prefix: 2, fragment: 1),
+                        max(
+                            weight(term, in: item.url, whole: 2, prefix: 1, fragment: 1),
+                            item.method.lowercased() == term ? 6 : 0))))
+            total += best
+        }
+        return total
+    }
+
+    /// What `term` is worth in `text`: a whole word, the start of one, or a fragment of one.
+    ///
+    /// The distinction is the point. "data" inside "database" is a fragment and worth almost
+    /// nothing; "data" as its own word is what the person meant.
+    private static func weight(
+        _ term: String, in text: String, whole: Int, prefix: Int, fragment: Int
+    ) -> Int {
+        let lowered = text.lowercased()
+        guard lowered.contains(term) else { return 0 }
+        let words = lowered.split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+        // "transaction" and "transactions" are the same word to anybody asking. Nothing cleverer
+        // than a trailing "s": a real stemmer would make the rule unpredictable, and predictable
+        // is what a caller choosing a request to fire at production needs.
+        if words.contains(where: { $0 == term || $0 == term + "s" || $0 + "s" == term }) {
+            return whole
+        }
+        if words.contains(where: { $0.hasPrefix(term) }) { return prefix }
+        return fragment
     }
 
     private func collect(
@@ -178,15 +234,13 @@ extension CommandRunner {
                     path: path.description, name: request.name,
                     method: request.method.rawValue, url: request.url,
                     description: request.description)
-                // A hit in the name is worth more than one in a URL: names are what people
-                // search by, and every request in a collection shares most of its URL.
-                let score =
-                    (request.name.count) + (request.description?.isEmpty == false ? 2 : 0)
+                // `score` is only the fuzzy fallback's tie-breaker now; `relevance` decides the
+                // ordering of anything that matched literally.
                 out.append((
                     found,
                     [path.description, request.name, request.method.rawValue, request.url,
                      request.description ?? ""].joined(separator: " ").lowercased(),
-                    score))
+                    request.name.count))
             }
         }
     }
