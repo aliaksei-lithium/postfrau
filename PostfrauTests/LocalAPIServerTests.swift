@@ -57,6 +57,33 @@ struct LocalAPIServerTests {
         return ((response as? HTTPURLResponse)?.statusCode ?? 0, data)
     }
 
+    /// A dry run must not reach the network, whichever side of the socket it is asked from.
+    ///
+    /// It used to. `--dry-run` was implemented only in the tool's local path, and the flag was
+    /// simply not on the wire — so a caller working through the app, which is a caller in a
+    /// sandbox, silently sent the request it was asking about. The skill tells agents to dry-run
+    /// before anything pointed at production, so the instruction did the opposite of its purpose.
+    @Test func aDryRunOverTheAPIDoesNotSend() async throws {
+        try await withServer { url, token in
+            // Points at a port with nothing on it: if this ever sends, it fails rather than
+            // quietly succeeding somewhere real.
+            let unreachable = "http://127.0.0.1:9/never"
+            let body = try JSONEncoder().encode(
+                LocalAPI.SendBody(method: "GET", url: unreachable, dryRun: true))
+            let (code, data) = try await status(
+                url.appending(path: "/v1/send"),
+                ["Authorization": "Bearer \(token)"], method: "POST", body: body)
+
+            #expect(code == 200)
+            // A dry run answers with what *would* be sent…
+            let dry = try JSONDecoder().decode(DryRunResult.self, from: data)
+            #expect(dry.method == "GET")
+            #expect(dry.url == unreachable)
+            // …and nothing that only a real send could produce.
+            #expect((try? JSONDecoder().decode(RunResult.self, from: data)) == nil)
+        }
+    }
+
     @Test func aGoodTokenGetsAnAnswer() async throws {
         try await withServer { base, token in
             let (code, data) = try await status(

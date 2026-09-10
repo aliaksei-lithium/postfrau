@@ -86,7 +86,13 @@ enum RemoteAPI {
                     environment: arguments.value("--env"),
                     variables: pairs(arguments, "--var"),
                     captures: pairs(arguments, "--capture"),
-                    bodyCap: arguments.value("--max-body").flatMap { Arguments.byteCount($0) })
+                    bodyCap: arguments.value("--max-body").flatMap { Arguments.byteCount($0) },
+                    dryRun: arguments.has("--dry-run"))
+                if arguments.has("--dry-run") {
+                    let dry: DryRunResult = try await post("/v1/run", body, endpoint)
+                    Run.report(dry, out)
+                    return .ok
+                }
                 let result: RunResult = try await post("/v1/run", body, endpoint)
                 return Run.finish(result, arguments, out)
 
@@ -105,7 +111,13 @@ enum RemoteAPI {
                     environment: arguments.value("--env"),
                     variables: pairs(arguments, "--var"),
                     captures: pairs(arguments, "--capture"),
-                    bodyCap: arguments.value("--max-body").flatMap { Arguments.byteCount($0) })
+                    bodyCap: arguments.value("--max-body").flatMap { Arguments.byteCount($0) },
+                    dryRun: arguments.has("--dry-run"))
+                if arguments.has("--dry-run") {
+                    let dry: DryRunResult = try await post("/v1/send", body, endpoint)
+                    Run.report(dry, out)
+                    return .ok
+                }
                 let result: RunResult = try await post("/v1/send", body, endpoint)
                 return Run.finish(result, arguments, out)
 

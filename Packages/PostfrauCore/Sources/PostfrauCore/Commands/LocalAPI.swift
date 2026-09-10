@@ -77,15 +77,20 @@ public enum LocalAPI {
         public var variables: [String: String]?
         public var captures: [String: String]?
         public var bodyCap: Int?
+        /// Build the request and describe it, but do not send it. Absent means send — an older
+        /// app talking to a newer tool would otherwise silently do the opposite of what was
+        /// asked, which for this flag is the dangerous direction.
+        public var dryRun: Bool?
         public init(
             path: String, environment: String? = nil, variables: [String: String]? = nil,
-            captures: [String: String]? = nil, bodyCap: Int? = nil
+            captures: [String: String]? = nil, bodyCap: Int? = nil, dryRun: Bool? = nil
         ) {
             self.path = path
             self.environment = environment
             self.variables = variables
             self.captures = captures
             self.bodyCap = bodyCap
+            self.dryRun = dryRun
         }
     }
 
@@ -99,10 +104,11 @@ public enum LocalAPI {
         public var variables: [String: String]?
         public var captures: [String: String]?
         public var bodyCap: Int?
+        public var dryRun: Bool?
         public init(
             method: String, url: String, headers: [HeaderField]? = nil, body: String? = nil,
             environment: String? = nil, variables: [String: String]? = nil,
-            captures: [String: String]? = nil, bodyCap: Int? = nil
+            captures: [String: String]? = nil, bodyCap: Int? = nil, dryRun: Bool? = nil
         ) {
             self.method = method
             self.url = url
@@ -112,6 +118,7 @@ public enum LocalAPI {
             self.variables = variables
             self.captures = captures
             self.bodyCap = bodyCap
+            self.dryRun = dryRun
         }
     }
 

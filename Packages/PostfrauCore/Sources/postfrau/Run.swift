@@ -148,7 +148,9 @@ enum Run {
         }
     }
 
-    private static func report(_ dry: DryRunResult, _ out: Output) {
+    /// Shared with `RemoteAPI`, so a dry run reads the same whether the workspace is on this
+    /// disk or behind the app.
+    static func report(_ dry: DryRunResult, _ out: Output) {
         if out.isJSON {
             out.json(dry)
             return

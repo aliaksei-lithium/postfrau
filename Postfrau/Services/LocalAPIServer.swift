@@ -206,6 +206,15 @@ actor LocalAPIServer {
                 if let environment = body.environment {
                     _ = try await runner.useEnvironment(named: environment)
                 }
+                // A dry run must not reach the network. The tool asks for this before anything
+                // pointed at production, so getting it wrong here sends the very request the
+                // caller was checking on.
+                if body.dryRun == true {
+                    return HTTPResponse(
+                        status: 200,
+                        json: try await runner.dryRun(
+                            requestAt: body.path, overrides: body.variables ?? [:]))
+                }
                 let result = try await runner.run(
                     requestAt: body.path,
                     overrides: body.variables ?? [:],
@@ -224,6 +233,11 @@ actor LocalAPIServer {
                 item.headers = body.headers?.map { KeyValue(key: $0.name, value: $0.value) } ?? []
                 if let text = body.body, !text.isEmpty {
                     item.body = .raw(text: text, language: .json)
+                }
+                if body.dryRun == true {
+                    return HTTPResponse(
+                        status: 200,
+                        json: try await runner.dryRun(item, overrides: body.variables ?? [:]))
                 }
                 let result = try await runner.send(
                     item,

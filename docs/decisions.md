@@ -1165,3 +1165,26 @@ value.
 **Also.** `get` printed an imported OpenAPI description raw, which for this API is a page of HTML
 role tables — burying `unresolved deposit_id`, the line that says what the caller has to supply.
 Tags are stripped and the text clipped to a line; `--json` still carries all of it.
+
+## D60 — `--dry-run` was ignored over the local API, which is the one place it mattered most
+
+Confirming D59's sandbox route, a run that had `--dry-run` on it came back `403 Forbidden` in
+143 ms. It had really been sent.
+
+`--dry-run` was implemented only in the tool's local path, in `Run.swift`. `RemoteAPI` never looked
+at the flag and the wire types had nowhere to put it, so a caller working through the app — which
+is a caller in a sandbox, the case the route exists for — silently sent the request it was asking
+about. The skill tells agents to dry-run before anything pointed at production, so following that
+instruction did the opposite of its purpose. Nothing in the output said so: it looks exactly like a
+run, because it was one.
+
+`RunBody` and `SendBody` now carry `dryRun`, the app builds the request and answers with a
+`DryRunResult` instead of sending, and the tool prints it through the same reporter as the local
+path so a dry run reads identically either side of the socket.
+
+**The flag is optional and absent means send.** It has to be that way round for an older app
+talking to a newer tool: a missing field must not be read as "do not send" by one side while the
+other believes it asked for a real run — but more importantly, a *newer* app talking to an older
+tool that cannot ask for a dry run must not start refusing to send. The dangerous direction is
+sending when asked not to, and that is now covered by a test that points a dry run at a port with
+nothing on it: if it ever sends, the test fails rather than quietly succeeding somewhere real.
