@@ -19,6 +19,39 @@ struct SecretsStoreTests {
     /// waits on it takes the whole test run with it.
     private func isUsable(_ store: SecretsStore) async -> Bool { KeychainProbe.isKeychainUsable }
 
+    @Test("An unchanged secret is not written again")
+    func persistSkipsWhatHasNotChanged() async throws {
+        let store = makeStore()
+        let scope = UUID()
+        let token = Variable(key: "token", value: "abc", isSecret: true)
+        let plain = Variable(key: "baseUrl", value: "https://example.com")
+
+        // Nothing to compare against: the value has to be written.
+        guard await isUsable(store) else {
+            // The skip itself needs no Keychain, so it is still worth asserting.
+            let skipped = try await store.persist([token], previous: [token], scope: scope)
+            #expect(skipped == 0, "an unchanged secret should not be written")
+            return
+        }
+
+        #expect(try await store.persist([token, plain], previous: [], scope: scope) == 1)
+
+        // The environment was edited, but not the token: nothing should reach the Keychain, and
+        // on a build without a stable signing identity that is a password prompt not asked for.
+        var renamed = plain
+        renamed.value = "https://staging.example.com"
+        #expect(
+            try await store.persist([token, renamed], previous: [token, plain], scope: scope) == 0)
+
+        // A token that really did change is written.
+        var rotated = token
+        rotated.value = "def"
+        #expect(try await store.persist([rotated], previous: [token], scope: scope) == 1)
+        #expect(try await store.value(scope: scope, key: "token") == "def")
+
+        try await store.deleteEverything()
+    }
+
     private func skipUnavailable() {
         withKnownIssue("Keychain is unavailable in this environment.", isIntermittent: true) {
             Issue.record("skipped")

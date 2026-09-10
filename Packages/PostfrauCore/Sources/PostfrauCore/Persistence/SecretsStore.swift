@@ -53,9 +53,12 @@ public actor SecretsStore {
     ///
     /// - Parameter previous: the variables as they were before the edit, so a renamed, deleted or
     ///   no-longer-secret variable does not leave its value behind in the Keychain.
+    /// - Returns: how many values were actually written, which is how the skipping above is
+    ///   tested without a Keychain to look into.
+    @discardableResult
     public func persist(
         _ variables: [Variable], previous: [Variable], scope: UUID
-    ) throws {
+    ) throws -> Int {
         let liveSecretKeys = Set(
             variables.filter { $0.isSecret && !$0.key.isEmpty }.map(\.key))
 
@@ -64,9 +67,25 @@ public actor SecretsStore {
                 try? delete(scope: scope, key: stale.key)
             }
         }
+        // Only what actually changed. Every Keychain write is a separate authorization, and on a
+        // build without a stable signing identity that is a password prompt — so rewriting a
+        // token that has not changed, because the environment was renamed or its base URL was
+        // edited, costs the user a prompt and stores nothing new.
+        //
+        // The trade-off: if a write was refused earlier, an unrelated edit no longer silently
+        // retries it. That failure is reported at the time (`secretsError`), and re-entering the
+        // value writes it, which is a better bargain than a prompt on every edit.
+        let alreadyStored = Dictionary(
+            previous.filter { $0.isSecret && !$0.key.isEmpty }.map { ($0.key, $0.value) },
+            uniquingKeysWith: { _, last in last })
+
+        var written = 0
         for variable in variables where variable.isSecret && !variable.key.isEmpty {
+            guard alreadyStored[variable.key] != variable.value else { continue }
             try setValue(variable.value, scope: scope, key: variable.key)
+            written += 1
         }
+        return written
     }
 
     /// Removes every secret belonging to one environment — used when the environment is deleted.
