@@ -3,11 +3,21 @@ import PostfrauCore
 
 /// The toolbar environment switcher, plus a quick look at the resolved variables.
 struct EnvironmentPicker: View {
+    /// The variable the clipboard button writes. A JWT that has just been minted somewhere else
+    /// nearly always ends up here, and going through the environments window to paste it is four
+    /// clicks and a window.
+    static let clipboardSecretKey = "token"
+
     @Environment(AppState.self) private var state
     @State private var showingQuickLook = false
+    @State private var pasteOutcome: PasteOutcome?
+
+    private enum PasteOutcome { case set, failed }
 
     var body: some View {
         HStack(spacing: 4) {
+            pasteTokenButton
+
             Picker("Environment", selection: activeEnvironment) {
                 Text("No environment").tag(UUID?.none)
                 if !state.workspace.environments.isEmpty {
@@ -35,6 +45,58 @@ struct EnvironmentPicker: View {
                 VariableQuickLook()
                     .frame(width: 380, height: 300)
             }
+        }
+    }
+
+    /// Pastes the clipboard into the `token` secret of the active environment.
+    ///
+    /// The clipboard is read on the click, never in `body`: reading it is a real cost and this
+    /// view is rebuilt whenever anything in the toolbar changes.
+    private var pasteTokenButton: some View {
+        Button {
+            let value = Pasteboard.text ?? ""
+            let ok = state.setActiveEnvironmentSecret(
+                named: Self.clipboardSecretKey, to: value)
+            pasteOutcome = ok ? .set : .failed
+            // Long enough to notice, short enough not to become part of the furniture.
+            Task {
+                try? await Task.sleep(for: .seconds(1.5))
+                pasteOutcome = nil
+            }
+        } label: {
+            Image(systemName: symbol)
+                .imageScale(.small)
+                .foregroundStyle(tint)
+        }
+        .disabled(state.workspace.activeEnvironmentID == nil)
+        .help(state.workspace.activeEnvironmentID == nil
+            ? "Choose an environment first"
+            : "Set “\(Self.clipboardSecretKey)” from the clipboard")
+        .accessibilityLabel("Set \(Self.clipboardSecretKey) from the clipboard")
+        .accessibilityValue(accessibilityOutcome)
+    }
+
+    private var symbol: String {
+        switch pasteOutcome {
+        case .set: "checkmark.circle.fill"
+        case .failed: "exclamationmark.circle.fill"
+        case nil: "key.horizontal.fill"
+        }
+    }
+
+    private var tint: AnyShapeStyle {
+        switch pasteOutcome {
+        case .set: AnyShapeStyle(.green)
+        case .failed: AnyShapeStyle(.orange)
+        case nil: AnyShapeStyle(.primary)
+        }
+    }
+
+    private var accessibilityOutcome: String {
+        switch pasteOutcome {
+        case .set: "Set"
+        case .failed: "Nothing on the clipboard"
+        case nil: ""
         }
     }
 

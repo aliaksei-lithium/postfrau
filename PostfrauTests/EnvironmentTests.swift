@@ -37,6 +37,44 @@ struct EnvironmentTests {
         }
     }
 
+    @Test("The toolbar button sets one secret in the active environment")
+    func clipboardFillsTheTokenSecret() {
+        let (state, _, _) = makeState()
+        var environment = state.newEnvironment(named: "Staging")
+        environment.variables = [Variable(key: "baseUrl", value: "https://example.com")]
+        state.update(environment)
+        state.workspace.activeEnvironmentID = environment.id
+
+        #expect(state.setActiveEnvironmentSecret(named: "token", to: "  eyJhbGciOi.abc  \n"))
+        let added = state.workspace.environments.first { $0.id == environment.id }?
+            .variables.first { $0.key == "token" }
+        #expect(added?.value == "eyJhbGciOi.abc", "the value should be trimmed")
+        #expect(added?.isSecret == true)
+        #expect(added?.enabled == true)
+        #expect(state.workspace.environments.first { $0.id == environment.id }?.variables.count == 2,
+                "baseUrl should still be there")
+
+        // A second press replaces the value rather than adding a second `token`.
+        #expect(state.setActiveEnvironmentSecret(named: "token", to: "second"))
+        let variables = state.workspace.environments.first { $0.id == environment.id }?.variables
+        #expect(variables?.filter { $0.key == "token" }.count == 1)
+        #expect(variables?.first { $0.key == "token" }?.value == "second")
+    }
+
+    @Test("Nothing is written without an environment, or from a blank clipboard")
+    func clipboardRefusesWhenThereIsNowhereToPutIt() {
+        let (state, _, _) = makeState()
+        // No active environment.
+        #expect(state.setActiveEnvironmentSecret(named: "token", to: "abc") == false)
+
+        let environment = state.newEnvironment(named: "Staging")
+        state.workspace.activeEnvironmentID = environment.id
+        // Whitespace only: a stray newline off the end of a copy is not a token.
+        #expect(state.setActiveEnvironmentSecret(named: "token", to: "   \n ") == false)
+        #expect(state.workspace.environments.first { $0.id == environment.id }?
+            .variables.contains { $0.key == "token" } == false)
+    }
+
     private func makeTab(_ state: AppState, url: String) -> RequestTab {
         let tab = RequestTab(draft: RequestItem(name: "R", url: url))
         state.tabs = [tab]

@@ -66,6 +66,34 @@ extension AppState {
         markUIStateDirty()
     }
 
+    /// Sets one secret variable in the active environment, adding it if it is not there yet.
+    ///
+    /// The value is passed in rather than read from the clipboard here, so this is testable
+    /// without one. Returns false when there is no active environment to put it in, or when the
+    /// value is blank once trimmed — a stray newline off the end of a copied token should not
+    /// count as a token, and neither should an empty clipboard.
+    @discardableResult
+    func setActiveEnvironmentSecret(named key: String, to value: String) -> Bool {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              let id = workspace.activeEnvironmentID,
+              let index = workspace.environments.firstIndex(where: { $0.id == id })
+        else { return false }
+
+        var environment = workspace.environments[index]
+        if let existing = environment.variables.firstIndex(where: { $0.key == key }) {
+            environment.variables[existing].value = trimmed
+            environment.variables[existing].isSecret = true
+            environment.variables[existing].enabled = true
+        } else {
+            environment.variables.append(Variable(key: key, value: trimmed, isSecret: true))
+        }
+        // Goes through `update`, so the environment is marked dirty, every resolver is
+        // invalidated, and the value reaches the Keychain like any other secret.
+        update(environment)
+        return true
+    }
+
     private func sortEnvironments() {
         workspace.environments.sort {
             $0.name.localizedStandardCompare($1.name) == .orderedAscending
