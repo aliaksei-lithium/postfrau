@@ -159,7 +159,11 @@ extension AppState {
     /// Returns false when the tab has no home yet — the caller should offer "Save As…".
     @discardableResult
     func saveTab(_ tab: RequestTab) -> Bool {
-        guard let collectionID = tab.collectionID, tab.requestID != nil,
+        guard tab.kind == .request else { return false }
+        // A request with no home yet — ⌘N, or one opened from history — gets one, rather than
+        // ⌘S quietly doing nothing.
+        if tab.requestID == nil { return saveToDrafts(tab) }
+        guard let collectionID = tab.collectionID,
               let index = workspace.collections.firstIndex(where: { $0.id == collectionID })
         else { return false }
 
@@ -167,6 +171,44 @@ extension AppState {
         guard workspace.collections[index].replace(.request(tab.savableDraft)) else { return false }
         tab.markSaved()
         markDirty(collection: collectionID)
+        markUIStateDirty()
+        return true
+    }
+
+    /// The collection unsaved requests are saved into. Postman calls the same idea "drafts".
+    static let draftsCollectionName = "Drafts"
+
+    /// Saves a request that belongs to no collection into "Drafts", creating it the first time.
+    ///
+    /// Every request lives in a collection — the CLI, export and history attribution all assume
+    /// it — so "saved without a project" means saved into one the user did not have to make. It
+    /// is found by name, so renaming it simply means the next such save starts a fresh one.
+    private func saveToDrafts(_ tab: RequestTab) -> Bool {
+        let draftsID = workspace.collections
+            .first { $0.name == Self.draftsCollectionName }?.id
+            ?? newCollection(named: Self.draftsCollectionName).id
+
+        var request = tab.savableDraft
+        // A fresh id: a tab opened from history carries the id of the request it recorded, which
+        // may still exist somewhere else.
+        request.id = UUID()
+        let name = request.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if name.isEmpty || name == "New Request", !request.url.isEmpty {
+            request.name = request.url
+                .replacingOccurrences(of: "https://", with: "")
+                .replacingOccurrences(of: "http://", with: "")
+        }
+        guard mutate(draftsID, actionName: "Save Request", { collection in
+            collection.insert(.request(request), into: nil)
+        }) else { return false }
+
+        tab.draft = request
+        tab.requestID = request.id
+        tab.collectionID = draftsID
+        tab.isFromHistory = false
+        tab.markSaved()
+        expandedIDs.insert(draftsID)
+        sidebarSection = .collections
         markUIStateDirty()
         return true
     }

@@ -34,7 +34,6 @@ struct PostfrauApp: App {
                 .environment(state)
         }
         .defaultSize(width: 820, height: 480)
-        .keyboardShortcut("e", modifiers: .command)
 
         Settings {
             SettingsWindow()

@@ -154,6 +154,8 @@ struct AppCommands: Commands {
         }
 
         CommandGroup(after: .toolbar) {
+            ManageEnvironmentsButton()
+                .keyboardShortcut("e", modifiers: .command)
             CommandButton(title: "Toggle Response Layout", state: state) {
                 $0.toggleResponseLayout()
             }
@@ -174,6 +176,18 @@ struct AppCommands: Commands {
 /// The identifier of the environments window, shared by the scene and the menu command.
 enum EnvironmentsWindowID {
     static let value = "environments"
+}
+
+/// View ▸ Manage Environments… (⌘E).
+///
+/// A menu item of its own rather than a shortcut on the `Window` scene: the scene's shortcut only
+/// surfaced in the Window menu, among the open windows, where nobody looked for it.
+private struct ManageEnvironmentsButton: View {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button("Manage Environments…") { openWindow(id: EnvironmentsWindowID.value) }
+    }
 }
 
 /// The History, Help and About menus.

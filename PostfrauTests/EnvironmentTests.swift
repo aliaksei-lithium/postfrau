@@ -286,4 +286,39 @@ struct EnvironmentTests {
         state.updateGlobals(Globals(variables: [Variable(key: "host", value: "https://x.test")]))
         #expect(state.unresolvedCounts(for: tab).url == 0)
     }
+
+    @Test("An edit in the quick look goes back to the layer that defined the variable")
+    func quickLookEditsLandInTheirOwnLayer() throws {
+        let (state, root, _) = makeState(secretStorage: .dataFolder)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        var environment = state.newEnvironment(named: "Staging")
+        environment.variables = [Variable(key: "token", value: "old")]
+        state.update(environment)
+        state.setActiveEnvironment(environment.id)
+        state.updateGlobals(Globals(variables: [Variable(key: "host", value: "a.test")]))
+
+        let folder = Folder(name: "Users", variables: [Variable(key: "page", value: "1")])
+        var collection = state.newCollection(named: "API")
+        collection.variables = [Variable(key: "version", value: "v1")]
+        state.updateCollection(collection)
+        state.mutate(collection.id, actionName: "Seed") { $0.insert(.folder(folder), into: nil) }
+        let requestID = try #require(
+            state.newRequest(in: collection.id, parentID: folder.id, named: "List"))
+        let tab = try #require(state.tabs.first { $0.requestID == requestID })
+
+        #expect(state.setScopedVariable(
+            "token", in: .environment(name: "Staging"), to: "new", for: tab))
+        #expect(state.setScopedVariable("host", in: .globals, to: "b.test", for: tab))
+        #expect(state.setScopedVariable("version", in: .collection(name: "API"), to: "v2", for: tab))
+        #expect(state.setScopedVariable("page", in: .folder(name: "Users"), to: "2", for: tab))
+
+        let values = state.scope(for: tab).effectiveValues()
+        #expect(values == ["token": "new", "host": "b.test", "version": "v2", "page": "2"])
+        #expect(state.workspace.activeEnvironment?.variables.first?.value == "new")
+
+        // The same value again is not a change, and an unknown key has nowhere to go.
+        #expect(!state.setScopedVariable("host", in: .globals, to: "b.test", for: tab))
+        #expect(!state.setScopedVariable("nope", in: .globals, to: "x", for: tab))
+    }
 }

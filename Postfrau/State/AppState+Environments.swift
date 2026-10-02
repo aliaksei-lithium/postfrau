@@ -94,6 +94,57 @@ extension AppState {
         return true
     }
 
+    /// Writes one variable's value back to the layer it came from, as the quick look shows it.
+    ///
+    /// The quick look lists what a request sees — environment, folders, collection, globals — so
+    /// an edit there has to land in whichever of those defined the row, not always in the
+    /// environment. Folders are found by name along the tab's own chain, innermost first, which is
+    /// the order the scope was built in. Returns false when nothing changed.
+    @discardableResult
+    func setScopedVariable(
+        _ key: String, in source: VariableSource, to value: String, for tab: RequestTab
+    ) -> Bool {
+        switch source {
+        case .environment:
+            guard var environment = workspace.activeEnvironment,
+                  Self.assign(value, to: key, in: &environment.variables) else { return false }
+            update(environment)
+            return true
+
+        case .globals:
+            var globals = workspace.globals
+            guard Self.assign(value, to: key, in: &globals.variables) else { return false }
+            updateGlobals(globals)
+            return true
+
+        case .collection:
+            guard let collectionID = tab.collectionID,
+                  var collection = workspace.collection(withID: collectionID),
+                  Self.assign(value, to: key, in: &collection.variables) else { return false }
+            updateCollection(collection, actionName: "Edit Variable")
+            return true
+
+        case .folder(let name):
+            guard let collectionID = tab.collectionID, let requestID = tab.requestID,
+                  let collection = workspace.collection(withID: collectionID),
+                  let chain = collection.folderChain(to: requestID),
+                  var folder = chain.reversed()
+                    .compactMap({ collection.folder(withID: $0) })
+                    .first(where: { $0.name == name && $0.variables.contains { $0.key == key } }),
+                  Self.assign(value, to: key, in: &folder.variables) else { return false }
+            updateFolder(folder, in: collectionID)
+            return true
+        }
+    }
+
+    /// Sets the first enabled `key` — the one the resolver reads — to `value`.
+    private static func assign(_ value: String, to key: String, in variables: inout [Variable]) -> Bool {
+        guard let index = variables.firstIndex(where: { $0.enabled && $0.key == key }),
+              variables[index].value != value else { return false }
+        variables[index].value = value
+        return true
+    }
+
     private func sortEnvironments() {
         workspace.environments.sort {
             $0.name.localizedStandardCompare($1.name) == .orderedAscending

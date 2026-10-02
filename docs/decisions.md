@@ -1188,3 +1188,38 @@ other believes it asked for a real run — but more importantly, a *newer* app t
 tool that cannot ask for a dry run must not start refusing to send. The dangerous direction is
 sending when asked not to, and that is now covered by a test that points a dry run at a port with
 nothing on it: if it ever sends, the test fails rather than quietly succeeding somewhere real.
+
+## D61 — The environments window had no way in, and the quick look became an editor
+
+The ⌘E shortcut lived on the `Window` scene, which only lists it in the Window menu among open
+windows, and the toolbar picker that `PLAN.md` §5 specifies with a "Manage…" item had been built as
+a bare `Picker`, which cannot hold one. In practice the window was unreachable. The picker is now a
+`Menu` wrapping an inline `Picker` plus "Manage Environments…", the quick look has a "Manage…"
+button, and View ▸ Manage Environments… (⌘E) is an ordinary menu command.
+
+Values in the quick look are text fields that save themselves — 400 ms after typing stops, on
+Return, on losing focus, and when the popover closes. Each edit is written back to the layer the
+row came from (`AppState.setScopedVariable`): the active environment, a folder on the request's
+chain, its collection, or globals. `VariableSource` carries names, not ids, so folders are matched
+by name along the tab's own chain, innermost first — the same order the scope is built in. Keys,
+secrecy and new variables stay in the environments window; the quick look edits values only.
+
+## D62 — ⌘S on a request with no collection saves it into "Drafts"
+
+`saveTab` required the tab to already belong to a collection, so ⌘S on a ⌘N tab did nothing at
+all. Every request lives in a collection — export, the CLI's paths and history attribution all
+assume it — so rather than introduce collection-less requests, an unsaved request is saved into a
+collection named "Drafts", created on first use and expanded in the sidebar. It is found by name;
+renaming it means the next such save starts a new one, which is the honest outcome. A tab opened
+from history goes the same way and gets a fresh request id, since the recorded one may still exist.
+
+## D63 — Sidebar rows could be left drawn over each other after an expansion
+
+Since 3942932 the disclosure binding sets `expandedIDs` with animations disabled, and
+the `NSTableView` under `List` occasionally kept stale frames for rows that moved, so groups were
+painted on top of each other until something else forced a layout. `SidebarRelayout` watches
+`expandedIDs` and the filter and, on the next run-loop turn and again 300 ms later, calls
+`noteHeightOfRows` (with a zero-duration animation context) for the *visible* rows only and marks
+the table for layout. It never touches off-screen rows, so it costs the same for a 5 000-request
+collection as for a small one, and it lives in a view of its own so an expansion re-evaluates
+nothing else.

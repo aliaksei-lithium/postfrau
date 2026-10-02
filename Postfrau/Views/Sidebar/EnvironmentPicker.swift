@@ -9,6 +9,7 @@ struct EnvironmentPicker: View {
     static let clipboardSecretKey = "token"
 
     @Environment(AppState.self) private var state
+    @Environment(\.openWindow) private var openWindow
     @State private var showingQuickLook = false
     @State private var pasteOutcome: PasteOutcome?
 
@@ -18,16 +19,28 @@ struct EnvironmentPicker: View {
         HStack(spacing: 4) {
             pasteTokenButton
 
-            Picker("Environment", selection: activeEnvironment) {
-                Text("No environment").tag(UUID?.none)
-                if !state.workspace.environments.isEmpty {
-                    Divider()
-                    ForEach(state.workspace.environments) { environment in
-                        Text(environment.name).tag(UUID?.some(environment.id))
+            // A menu rather than a bare picker, so the way into the environments window sits
+            // right where environments are chosen — the picker alone left it reachable only by a
+            // shortcut nobody could see.
+            Menu {
+                Picker("Environment", selection: activeEnvironment) {
+                    Text("No environment").tag(UUID?.none)
+                    if !state.workspace.environments.isEmpty {
+                        Divider()
+                        ForEach(state.workspace.environments) { environment in
+                            Text(environment.name).tag(UUID?.some(environment.id))
+                        }
                     }
                 }
+                .pickerStyle(.inline)
+                .labelsHidden()
+
+                Divider()
+                Button("Manage Environments…") { openWindow(id: EnvironmentsWindowID.value) }
+            } label: {
+                Text(state.workspace.activeEnvironment?.name ?? "No environment")
+                    .lineLimit(1)
             }
-            .labelsHidden()
             .frame(minWidth: 150)
             .accessibilityLabel("Active environment")
 
@@ -39,11 +52,14 @@ struct EnvironmentPicker: View {
                 Image(systemName: "square.3.layers.3d")
                     .imageScale(.small)
             }
-            .help("Show the variables this request will see")
+            .help("Show and edit the variables this request will see")
             .accessibilityLabel("Show resolved variables")
             .popover(isPresented: $showingQuickLook, arrowEdge: .bottom) {
-                VariableQuickLook()
-                    .frame(width: 380, height: 300)
+                VariableQuickLook {
+                    showingQuickLook = false
+                    openWindow(id: EnvironmentsWindowID.value)
+                }
+                .frame(width: 400, height: 320)
             }
         }
     }
@@ -111,23 +127,35 @@ struct EnvironmentPicker: View {
 }
 
 /// Every variable visible to the selected tab, with its source, shadowing and secrets masked.
+///
+/// Values are editable in place and save themselves: an edit goes back to whichever layer defined
+/// the row — environment, folder, collection or globals — through `AppState`, and from there to
+/// disk with the ordinary autosave.
 struct VariableQuickLook: View {
     @Environment(AppState.self) private var state
+    var manageEnvironments: () -> Void = {}
     @State private var revealed: Set<String> = []
 
     var body: some View {
-        let variables = state.selectedTab.map { state.scope(for: $0).allVariables() } ?? []
+        let tab = state.selectedTab
+        let variables = tab.map { state.scope(for: $0).allVariables() } ?? []
 
         VStack(alignment: .leading, spacing: 0) {
-            Text("Variables in scope")
-                .font(.headline)
-                .padding(12)
+            HStack {
+                Text("Variables in scope")
+                    .font(.headline)
+                Spacer()
+                Button("Manage…", action: manageEnvironments)
+                    .controlSize(.small)
+                    .help("Open the environments window (⌘E)")
+            }
+            .padding(12)
 
             if variables.isEmpty {
                 CenteredMessage(
                     symbol: "curlybraces", title: "No variables",
                     message: "Add them to an environment, a collection, or globals.")
-            } else {
+            } else if let tab {
                 List(Array(variables.enumerated()), id: \.offset) { _, variable in
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         VStack(alignment: .leading, spacing: 2) {
@@ -139,7 +167,7 @@ struct VariableQuickLook: View {
                                 .foregroundStyle(.tertiary)
                         }
                         Spacer(minLength: 8)
-                        value(for: variable)
+                        value(for: variable, in: tab)
                     }
                     .opacity(variable.isShadowed ? 0.5 : 1)
                     .help(variable.isShadowed
@@ -151,22 +179,75 @@ struct VariableQuickLook: View {
         }
     }
 
+    /// Identifies a row across edits: the same key can appear once per layer.
+    private func revealKey(_ variable: ResolvedVariable) -> String {
+        "\(variable.source.categoryName)/\(variable.source.displayName)/\(variable.key)"
+    }
+
     @ViewBuilder
-    private func value(for variable: ResolvedVariable) -> some View {
-        if variable.isSecret && !revealed.contains(variable.key) {
-            Button("•••••") { revealed.insert(variable.key) }
+    private func value(for variable: ResolvedVariable, in tab: RequestTab) -> some View {
+        if variable.isSecret && !revealed.contains(revealKey(variable)) {
+            Button("•••••") { revealed.insert(revealKey(variable)) }
                 .buttonStyle(.plain)
                 .font(.system(.callout, design: .monospaced))
                 .foregroundStyle(.secondary)
-                .help("Click to reveal")
+                .help("Click to reveal and edit")
                 .accessibilityLabel("Secret value for \(variable.key), click to reveal")
         } else {
-            Text(variable.value.isEmpty ? "—" : variable.value)
-                .font(.system(.callout, design: .monospaced))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .textSelection(.enabled)
+            VariableValueField(value: variable.value) { newValue in
+                _ = state.setScopedVariable(
+                    variable.key, in: variable.source, to: newValue, for: tab)
+            }
+            .accessibilityLabel("Value of \(variable.key)")
         }
+    }
+}
+
+/// One editable value in the quick look. Saves a moment after typing stops, on Return, when focus
+/// leaves, and when the popover closes — there is no Save button to forget.
+private struct VariableValueField: View {
+    var value: String
+    var commit: (String) -> Void
+
+    @State private var text = ""
+    @State private var pendingCommit: Task<Void, Never>?
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        TextField("—", text: $text)
+            .textFieldStyle(.plain)
+            .font(.system(.callout, design: .monospaced))
+            .foregroundStyle(isFocused ? .primary : .secondary)
+            .multilineTextAlignment(.trailing)
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .focused($isFocused)
+            .frame(maxWidth: 220)
+            .onAppear { text = value }
+            // Something else changed the value — the environments window, the CLI, a capture.
+            // Take it, unless the user is midway through typing over it.
+            .onChange(of: value) { _, newValue in
+                if !isFocused { text = newValue }
+            }
+            .onChange(of: text) { _, newValue in
+                guard newValue != value else { return }
+                pendingCommit?.cancel()
+                // A pause rather than every keystroke: each commit marks the layer dirty and, for
+                // a Keychain secret, goes to the Keychain.
+                pendingCommit = Task {
+                    try? await Task.sleep(for: .milliseconds(400))
+                    guard !Task.isCancelled else { return }
+                    commit(newValue)
+                }
+            }
+            .onSubmit(flush)
+            .onChange(of: isFocused) { _, focused in if !focused { flush() } }
+            .onDisappear(perform: flush)
+    }
+
+    private func flush() {
+        pendingCommit?.cancel()
+        pendingCommit = nil
+        if text != value { commit(text) }
     }
 }

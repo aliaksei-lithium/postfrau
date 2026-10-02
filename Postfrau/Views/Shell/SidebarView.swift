@@ -45,6 +45,7 @@ struct SidebarView: View {
             }
             .background(PressToSelect())
             .background(SelectionPaintWatcher())
+            .background(SidebarRelayout())
             // Dropping a file on the sidebar is the other obvious way to import one.
             .dropDestination(for: URL.self) { urls, _ in
                 guard let url = urls.first else { return false }
