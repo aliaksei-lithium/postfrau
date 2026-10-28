@@ -19,6 +19,10 @@ public struct RunResult: Sendable, Codable {
     public var captured: [String: String]
     /// Anything the builder wanted to say: a missing variable, a skipped file.
     public var warnings: [String]
+    /// With `run --from-file`: the line this send was made for.
+    public var input: String?
+    /// With `run --from-file`: the id generated for this send, to find it in the server's logs.
+    public var correlationId: String?
 
     public var isSuccess: Bool { (status ?? 0) < 400 && error == nil }
 }
@@ -30,6 +34,10 @@ public struct DryRunResult: Sendable, Codable {
     public var headers: [HeaderField]
     public var bodyPreview: String?
     public var bodyBytes: Int?
+    /// What replaced or changed the saved body — `--body`, `--field id` — or nil when the saved
+    /// body goes out as it is. Said out loud because a dry run that quietly shows the saved body
+    /// is exactly how an override that did nothing went unnoticed.
+    public var bodyOrigin: String?
     public var warnings: [String]
     public var unresolvedVariables: [String]
 }
@@ -43,22 +51,25 @@ extension CommandRunner {
 
     /// Builds a request without sending it.
     public func dryRun(
-        requestAt path: String, overrides: [String: String] = [:]
+        requestAt path: String, overrides: [String: String] = [:],
+        patch: RequestPatch = RequestPatch()
     ) async throws -> DryRunResult {
         let resolved = try await resolve(path)
         guard case .request(let request, _, _) = resolved else {
             throw CommandError.invalid("“\(path)” is a \(resolved.kind), not a request.")
         }
-        return try dryRun(request, overrides: overrides, requestID: request.id)
+        return try dryRun(request, overrides: overrides, requestID: request.id, patch: patch)
     }
 
     /// The ad-hoc form: a request that is not in any collection.
     public func dryRun(
-        _ request: RequestItem, overrides: [String: String] = [:], requestID: UUID? = nil
+        _ request: RequestItem, overrides: [String: String] = [:], requestID: UUID? = nil,
+        patch: RequestPatch = RequestPatch()
     ) throws -> DryRunResult {
         let variableScope = requestID.map { scope(forRequestWithID: $0, overrides: overrides) }
             ?? adHocScope(overrides: overrides)
         let resolver = VariableResolver(scope: variableScope)
+        let request = try patch.applied(to: request, resolver: resolver)
         let auth = requestID.map { effectiveAuth(forRequestWithID: $0) } ?? request.auth
 
         let built: BuiltRequest
@@ -84,6 +95,7 @@ extension CommandRunner {
             headers: HistoryRedactor.redact(headers: built.allHeaders),
             bodyPreview: preview,
             bodyBytes: bytes,
+            bodyOrigin: patch.bodyOrigin,
             warnings: built.warnings,
             unresolvedVariables: resolver.resolve(request.url).unresolved)
     }
@@ -115,7 +127,8 @@ extension CommandRunner {
         overrides: [String: String] = [:],
         bodyCap: Int = CommandRunner.defaultBodyCap,
         captures: [String: String] = [:],
-        captureAsSecret: Bool = false
+        captureAsSecret: Bool = false,
+        patch: RequestPatch = RequestPatch()
     ) async throws -> RunResult {
         let workspace = try await load()
         let resolved = try await resolve(path)
@@ -126,7 +139,7 @@ extension CommandRunner {
             request,
             path: ItemResolver.path(toItemWithID: request.id, in: workspace)?.description,
             requestID: request.id, overrides: overrides, bodyCap: bodyCap,
-            captures: captures, captureAsSecret: captureAsSecret)
+            captures: captures, captureAsSecret: captureAsSecret, patch: patch)
     }
 
     /// Sends every request under a folder or collection, in order.
@@ -140,6 +153,7 @@ extension CommandRunner {
         stopOnError: Bool = false,
         captures: [String: String] = [:],
         captureAsSecret: Bool = false,
+        patch: RequestPatch = RequestPatch(),
         onResult: (@Sendable (RunResult) -> Void)? = nil
     ) async throws -> [RunResult] {
         let workspace = try await load()
@@ -162,7 +176,7 @@ extension CommandRunner {
                 request,
                 path: ItemResolver.path(toItemWithID: request.id, in: workspace)?.description,
                 requestID: request.id, overrides: running, bodyCap: bodyCap,
-                captures: captures, captureAsSecret: captureAsSecret)
+                captures: captures, captureAsSecret: captureAsSecret, patch: patch)
             results.append(result)
             onResult?(result)
             // A capture from one request is available to the next — which is the whole point of
@@ -181,12 +195,16 @@ extension CommandRunner {
         overrides: [String: String] = [:],
         bodyCap: Int = CommandRunner.defaultBodyCap,
         captures: [String: String] = [:],
-        captureAsSecret: Bool = false
+        captureAsSecret: Bool = false,
+        patch: RequestPatch = RequestPatch()
     ) async throws -> RunResult {
         _ = try await load()
         let variableScope = requestID.map { scope(forRequestWithID: $0, overrides: overrides) }
             ?? adHocScope(overrides: overrides)
         let resolver = VariableResolver(scope: variableScope)
+        // Thrown rather than reported as a failed send: a --field that cannot be applied is the
+        // caller's mistake, and nothing has gone near the network.
+        let request = try patch.applied(to: request, resolver: resolver)
         let auth = requestID.map { effectiveAuth(forRequestWithID: $0) } ?? request.auth
         let secretValues = HistoryRecorder.secrets(
             in: variableScope, auth: auth, resolver: resolver)

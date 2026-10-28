@@ -53,6 +53,32 @@ struct LocalAPITests {
         #expect(decodedSend.body == #"{"force":true}"#)
     }
 
+    @Test func aPatchCrossesTheWire() throws {
+        let run = LocalAPI.RunBody(
+            path: "Payments/Create",
+            patch: RequestPatch(
+                body: "{}", fields: [.init(path: "partner_bank_id", value: "7")],
+                headers: [HeaderField(name: "X-Correlation-ID", value: "abc")]))
+        let decoded = try JSONDecoder().decode(
+            LocalAPI.RunBody.self, from: JSONEncoder().encode(run))
+        #expect(decoded.patch == run.patch)
+
+        // A tool that predates the field sends none, and the app reads that as no patch.
+        let old = try JSONDecoder().decode(
+            LocalAPI.RunBody.self, from: Data(#"{"path":"a"}"#.utf8))
+        #expect(old.patch == nil)
+    }
+
+    /// The tool refuses to send a patch to an app that cannot read one, so an app that says
+    /// nothing about capabilities has to decode as having none.
+    @Test func anOldAppReportsNoCapabilities() throws {
+        let old = try JSONDecoder().decode(
+            LocalAPI.Ping.self, from: Data(#"{"version":"3.4","dataFolder":"/x"}"#.utf8))
+        #expect(old.capabilities == nil)
+        #expect(LocalAPI.Ping(version: "3.5", dataFolder: "/x").capabilities?
+            .contains(LocalAPI.Capability.requestPatch) == true)
+    }
+
     /// The default is off with no token, so a workspace that never asks for this never stores a
     /// credential, and an upgrade cannot silently open a socket.
     @Test func theAPIIsOffAndTokenlessByDefault() throws {

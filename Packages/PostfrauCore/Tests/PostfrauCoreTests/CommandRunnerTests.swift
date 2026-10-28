@@ -375,6 +375,55 @@ struct CommandRunnerTests {
         #expect(dry.url == "https://override.test/users")
     }
 
+    /// The v3.4 report: `run --body @payload.json --dry-run` showed the saved body.
+    @Test func aDryRunShowsAnOverriddenBodyAndItsSize() async throws {
+        let temp = TempDirectory()
+        let runner = try await makeRunner(at: temp.url)
+
+        let saved = try await runner.dryRun(requestAt: "Acme API/API/Users/Create")
+        #expect(saved.bodyPreview == #"{"name":"a"}"#)
+        #expect(saved.bodyOrigin == nil)
+
+        let body = #"{"partner_bank_id":{{bank}}}"#
+        let dry = try await runner.dryRun(
+            requestAt: "Acme API/API/Users/Create", overrides: ["bank": "42"],
+            patch: RequestPatch(body: body))
+        #expect(dry.bodyPreview == #"{"partner_bank_id":42}"#)
+        #expect(dry.bodyBytes == 22)
+        #expect(dry.bodyOrigin == "--body")
+
+        let field = try await runner.dryRun(
+            requestAt: "Acme API/API/Users/Create",
+            patch: RequestPatch(fields: [.init(path: "name", value: "b")]))
+        #expect(field.bodyPreview == #"{"name":"b"}"#)
+        #expect(field.bodyOrigin == "--field name")
+    }
+
+    @Test func runSendsThePatchedRequestAndLeavesTheSavedOneAlone() async throws {
+        let temp = TempDirectory()
+        CommandStubProtocol.stub(.init())
+        let runner = try await makeRunner(at: temp.url, protocolClasses: [CommandStubProtocol.self])
+        await runner.setRecordLevel(.full)
+
+        let result = try await runner.run(
+            requestAt: "Acme API/API/Users/Create",
+            patch: RequestPatch(
+                body: #"{"override":true}"#,
+                headers: [HeaderField(name: "X-Correlation-ID", value: "abc")]))
+        #expect(result.isSuccess)
+
+        let entry = try #require(await runner.history.load().first)
+        #expect(entry.requestSnapshot.body == .raw(text: #"{"override":true}"#, language: .json))
+        #expect(entry.requestBody.map { String(decoding: $0.data, as: UTF8.self) }
+            == #"{"override":true}"#, "history records what was sent, not what is saved")
+        #expect(entry.requestHeaders?.contains {
+            $0.name == "X-Correlation-ID" && $0.value == "abc"
+        } == true)
+
+        let unchanged = try await runner.detail(path: "Acme API/API/Users/Create")
+        #expect(unchanged.body.text == #"{"name":"a"}"#, "a patch is for one send, never saved")
+    }
+
     @Test func runSendsAndRecordsWithAttribution() async throws {
         let temp = TempDirectory()
                 CommandStubProtocol.stub(.init(body: Data(#"{"ok":true}"#.utf8)))

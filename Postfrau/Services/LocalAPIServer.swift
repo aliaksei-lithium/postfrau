@@ -213,13 +213,15 @@ actor LocalAPIServer {
                     return HTTPResponse(
                         status: 200,
                         json: try await runner.dryRun(
-                            requestAt: body.path, overrides: body.variables ?? [:]))
+                            requestAt: body.path, overrides: body.variables ?? [:],
+                            patch: body.patch ?? RequestPatch()))
                 }
                 let result = try await runner.run(
                     requestAt: body.path,
                     overrides: body.variables ?? [:],
                     bodyCap: body.bodyCap ?? CommandRunner.defaultBodyCap,
-                    captures: body.captures ?? [:])
+                    captures: body.captures ?? [:],
+                    patch: body.patch ?? RequestPatch())
                 return HTTPResponse(status: 200, json: result)
 
             case ("POST", "/v1/send"):
@@ -232,7 +234,7 @@ actor LocalAPIServer {
                     url: body.url)
                 item.headers = body.headers?.map { KeyValue(key: $0.name, value: $0.value) } ?? []
                 if let text = body.body, !text.isEmpty {
-                    item.body = .raw(text: text, language: .json)
+                    item.body = .raw(guessingLanguageOf: text)
                 }
                 if body.dryRun == true {
                     return HTTPResponse(

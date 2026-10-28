@@ -13,10 +13,16 @@ struct LocalAPIServerTests {
     /// A port unlikely to collide with anything else on the machine running the tests.
     private static func freePort() -> UInt16 { UInt16.random(in: 42_000...48_000) }
 
-    private func makeServer(port: UInt16, token: String) -> (LocalAPIServer, URL) {
+    private func makeServer(
+        port: UInt16, token: String, seed: RequestCollection? = nil
+    ) async throws -> (LocalAPIServer, URL) {
         let root = URL.temporaryDirectory.appending(path: "api-\(UUID().uuidString)")
         let folder = DataFolder(root: root.appending(path: "Data"), needsCoordination: false)
         let store = WorkspaceStore(dataFolder: folder, localRoot: root)
+        if let seed {
+            try folder.prepare()
+            try await store.save(collection: seed)
+        }
         let server = LocalAPIServer(
             port: port, token: token,
             runner: CommandRunner(
@@ -28,10 +34,11 @@ struct LocalAPIServerTests {
     /// Runs `body` against a started server, then always stops it.
     private func withServer(
         token: String = LocalAPI.makeToken(),
+        seed: RequestCollection? = nil,
         _ body: (URL, String) async throws -> Void
     ) async throws {
         let port = Self.freePort()
-        let (server, root) = makeServer(port: port, token: token)
+        let (server, root) = try await makeServer(port: port, token: token, seed: seed)
         defer { try? FileManager.default.removeItem(at: root) }
         do {
             try await server.start()
@@ -81,6 +88,40 @@ struct LocalAPIServerTests {
             #expect(dry.url == unreachable)
             // …and nothing that only a real send could produce.
             #expect((try? JSONDecoder().decode(RunResult.self, from: data)) == nil)
+        }
+    }
+
+    /// The v3.4 report: `postfrau --body @payload.json run <saved-request>` through the app
+    /// accepted the flag and dry-ran — and would have sent — the saved body.
+    @Test func runOverTheAPIAppliesTheBodyItIsGiven() async throws {
+        let collection = RequestCollection(
+            name: "Pay",
+            items: [.request(RequestItem(
+                name: "Create", method: .post, url: "http://127.0.0.1:9/never",
+                body: .raw(text: #"{"items":[1]}"#, language: .json)))])
+        try await withServer(seed: collection) { url, token in
+            let body = try JSONEncoder().encode(LocalAPI.RunBody(
+                path: "Pay/Create", variables: ["bank": "7"], dryRun: true,
+                patch: RequestPatch(
+                    body: #"{"partner_bank_id":0}"#,
+                    fields: [.init(path: "partner_bank_id", value: "{{bank}}")],
+                    headers: [HeaderField(name: "X-Correlation-ID", value: "abc")])))
+            let (code, data) = try await status(
+                url.appending(path: "/v1/run"),
+                ["Authorization": "Bearer \(token)"], method: "POST", body: body)
+
+            #expect(code == 200, "\(String(decoding: data, as: UTF8.self))")
+            let dry = try JSONDecoder().decode(DryRunResult.self, from: data)
+            #expect(dry.bodyPreview == #"{"partner_bank_id":7}"#)
+            #expect(dry.bodyBytes == 21)
+            #expect(dry.bodyOrigin == "--body, --field partner_bank_id")
+            #expect(dry.headers.contains { $0.name == "X-Correlation-ID" && $0.value == "abc" })
+
+            // And the app says it understands a patch, which is what the tool checks first.
+            let (_, pingData) = try await status(
+                url.appending(path: "/v1/ping"), ["Authorization": "Bearer \(token)"])
+            let ping = try JSONDecoder().decode(LocalAPI.Ping.self, from: pingData)
+            #expect(ping.capabilities?.contains(LocalAPI.Capability.requestPatch) == true)
         }
     }
 
@@ -139,7 +180,7 @@ struct LocalAPIServerTests {
     /// stops being true the moment the Mac joins a network.
     @Test func theListenerIsNotReachableFromANonLoopbackAddress() async throws {
         let port = Self.freePort()
-        let (server, root) = makeServer(port: port, token: LocalAPI.makeToken())
+        let (server, root) = try await makeServer(port: port, token: LocalAPI.makeToken())
         defer { try? FileManager.default.removeItem(at: root) }
         do { try await server.start() } catch {
             withKnownIssue("this environment does not allow listening sockets") { throw error }

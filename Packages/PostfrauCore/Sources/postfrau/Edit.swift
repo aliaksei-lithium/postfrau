@@ -181,20 +181,28 @@ enum Edit {
 
     /// `-d text`, `-d @file`, `-d -` (stdin).
     static func readBody(_ arguments: Arguments) throws -> RequestBody? {
+        try readBodyText(arguments).map { RequestBody.raw(guessingLanguageOf: $0) }
+    }
+
+    /// The text of `--body`/`-d`, with `@file` and `-` read. Nil when neither flag was given.
+    ///
+    /// The Local API path needs the text rather than a `RequestBody`: the file is on this side of
+    /// the socket, and forwarding `@payload.json` verbatim would send the file's name as the body.
+    static func readBodyText(_ arguments: Arguments) throws -> String? {
         guard let raw = arguments.value("--body", "-d") else { return nil }
-        let text: String
         if raw == "-" {
-            text = String(decoding: FileHandle.standardInput.readDataToEndOfFile(), as: UTF8.self)
-        } else if raw.hasPrefix("@") {
-            text = try String(contentsOf: URL(filePath: String(raw.dropFirst())), encoding: .utf8)
-        } else {
-            text = raw
+            return String(decoding: FileHandle.standardInput.readDataToEndOfFile(), as: UTF8.self)
         }
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let language: RawLanguage =
-            trimmed.hasPrefix("{") || trimmed.hasPrefix("[") ? .json
-            : (trimmed.hasPrefix("<") ? .xml : .text)
-        return .raw(text: text, language: language)
+        if raw.hasPrefix("@") {
+            let path = String(raw.dropFirst())
+            do {
+                return try String(contentsOf: URL(filePath: path), encoding: .utf8)
+            } catch {
+                throw CommandRunner.CommandError.invalid(
+                    "cannot read the body from \(path): \(CommandRunner.message(for: error))")
+            }
+        }
+        return raw
     }
 
     /// `bearer:TOKEN`, `basic:USER:PASS`, `apikey:KEY:VALUE[:query]`, `none`, `inherit`.

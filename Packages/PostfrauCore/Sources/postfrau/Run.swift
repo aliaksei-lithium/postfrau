@@ -15,9 +15,28 @@ enum Run {
         let captures = Dictionary(arguments.pairs("--capture"), uniquingKeysWith: { _, new in new })
         let cap: Int = arguments.value("--max-body").flatMap { Arguments.byteCount($0) }
             ?? CommandRunner.defaultBodyCap
+        if let problem = conflict(in: arguments) {
+            out.error(problem)
+            return .usage
+        }
+        let patch = try patch(from: arguments)
+
+        if let batch = try Batch(arguments) {
+            return try await batch.run(arguments, overrides: overrides, patch: patch, out) {
+                variables, patch, dryRun in
+                if dryRun {
+                    return .dry(try await runner.dryRun(
+                        requestAt: path, overrides: variables, patch: patch))
+                }
+                return .sent(try await runner.run(
+                    requestAt: path, overrides: variables, bodyCap: cap,
+                    captures: captures, captureAsSecret: arguments.has("--secret"),
+                    patch: patch))
+            }
+        }
 
         if arguments.has("--dry-run") {
-            let dry = try await runner.dryRun(requestAt: path, overrides: overrides)
+            let dry = try await runner.dryRun(requestAt: path, overrides: overrides, patch: patch)
             report(dry, out)
             return .ok
         }
@@ -34,7 +53,7 @@ enum Run {
                 under: path, overrides: overrides, bodyCap: cap,
                 stopOnError: arguments.has("--stop-on-error"),
                 captures: captures, captureAsSecret: arguments.has("--secret"),
-                onResult: stream)
+                patch: patch, onResult: stream)
 
             if !out.isJSON {
                 out.table(results.map { result in
@@ -51,8 +70,155 @@ enum Run {
 
         let result = try await runner.run(
             requestAt: path, overrides: overrides, bodyCap: cap,
-            captures: captures, captureAsSecret: arguments.has("--secret"))
+            captures: captures, captureAsSecret: arguments.has("--secret"), patch: patch)
         return finish(result, arguments, out)
+    }
+
+    // MARK: - Changing a saved request for one run
+
+    /// `--body`, `--field` and `-H` on `run`: what to change about the saved request, this once.
+    /// Shared with `RemoteAPI`, which sends the same patch to the app.
+    static func patch(from arguments: Arguments) throws -> RequestPatch {
+        RequestPatch(
+            body: try Edit.readBodyText(arguments),
+            fields: arguments.pairs("--field").map { .init(path: $0.key, value: $0.value) },
+            headers: arguments.colonPairs("--header", "-H")
+                .map { HeaderField(name: $0.key, value: $0.value) })
+    }
+
+    /// Combinations that cannot mean what they say. Checked before anything is read or sent.
+    static func conflict(in arguments: Arguments) -> String? {
+        let changesBody = arguments.value("--body", "-d") != nil || !arguments.pairs("--field").isEmpty
+        if arguments.has("--all"), changesBody {
+            return "--body and --field apply to one request; with --all every request in the "
+                + "folder would get the same body. Run the request by its path instead."
+        }
+        if arguments.has("--all"), arguments.value("--from-file") != nil {
+            return "--from-file runs one request per line; it cannot be combined with --all."
+        }
+        if arguments.value("--from-file") == "-", arguments.value("--body", "-d") == "-" {
+            return "--from-file - and --body - cannot both read standard input."
+        }
+        if arguments.value("--from-file") != nil, arguments.value("--each") == nil {
+            return "--from-file needs --each NAME: the variable each line is stored in, as in "
+                + "`--from-file banks.txt --each bank --field partner_bank_id={{bank}}`."
+        }
+        return nil
+    }
+
+    // MARK: - One request per line
+
+    /// `run <path> --from-file banks.txt --each bank`: the same saved request, once per line,
+    /// in order, each with its own correlation id.
+    struct Batch {
+        var inputs: [String]
+        var variable: String
+        var correlationHeader: String?
+
+        /// The name a saved request can use, `{{correlation_id}}`, to put the id wherever its
+        /// API expects one. `--correlation-header` is the shortcut for the common case.
+        static let correlationVariable = "correlation_id"
+
+        enum Outcome {
+            case sent(RunResult)
+            case dry(DryRunResult)
+        }
+
+        /// Nil when `--from-file` was not given.
+        init?(_ arguments: Arguments) throws {
+            guard let file = arguments.value("--from-file") else { return nil }
+            let text: String
+            if file == "-" {
+                text = String(
+                    decoding: FileHandle.standardInput.readDataToEndOfFile(), as: UTF8.self)
+            } else {
+                do {
+                    text = try String(contentsOf: URL(filePath: file), encoding: .utf8)
+                } catch {
+                    throw CommandRunner.CommandError.invalid(
+                        "cannot read \(file): \(CommandRunner.message(for: error))")
+                }
+            }
+            // Blank lines and `#` comments are skipped, so a list can be annotated.
+            inputs = text.split(whereSeparator: \.isNewline)
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty && !$0.hasPrefix("#") }
+            guard !inputs.isEmpty else {
+                throw CommandRunner.CommandError.invalid("\(file) has no lines to run.")
+            }
+            variable = arguments.value("--each") ?? ""
+            correlationHeader = arguments.value("--correlation-header")
+        }
+
+        /// Runs every line through `perform`. With `--json`, one NDJSON line per send, as it
+        /// lands, each carrying `input` and `correlationId`.
+        func run(
+            _ arguments: Arguments,
+            overrides: [String: String],
+            patch: RequestPatch,
+            _ out: Output,
+            perform: ([String: String], RequestPatch, Bool) async throws -> Outcome
+        ) async throws -> ExitCode {
+            let dryRun = arguments.has("--dry-run")
+            let width = inputs.map(Output.displayWidth).max() ?? 0
+            var failures: [RunResult] = []
+
+            for input in inputs {
+                let id = UUID().uuidString.lowercased()
+                var variables = overrides
+                variables[variable] = input
+                // A `--var correlation_id=…` is the caller's to keep.
+                if variables[Self.correlationVariable] == nil {
+                    variables[Self.correlationVariable] = id
+                }
+                var patch = patch
+                if let correlationHeader {
+                    patch.headers.append(HeaderField(name: correlationHeader, value: id))
+                }
+
+                switch try await perform(variables, patch, dryRun) {
+                case .dry(let dry):
+                    if out.isJSON {
+                        out.ndjson(Labelled(input: input, correlationId: id, dryRun: dry))
+                    } else {
+                        out.print(out.bold("# \(variable)=\(input)") + out.dim("  \(id)"))
+                        Run.report(dry, out)
+                        out.print("")
+                    }
+                case .sent(var result):
+                    result.input = input
+                    result.correlationId = id
+                    if out.isJSON {
+                        out.ndjson(result)
+                    } else {
+                        let padding = String(
+                            repeating: " ", count: max(0, width - Output.displayWidth(input)))
+                        out.print([
+                            out.status(result.status), input + padding,
+                            out.dim(ByteCount.formatDuration(milliseconds: result.durationMs)),
+                            out.dim(id),
+                        ].joined(separator: "  "))
+                        if let error = result.error { out.error(error) }
+                    }
+                    if !result.isSuccess {
+                        failures.append(result)
+                        if arguments.has("--stop-on-error") { break }
+                    }
+                }
+            }
+
+            if arguments.has("--fail"), !failures.isEmpty {
+                return failures.contains { $0.error != nil } ? .transport : .httpFailure
+            }
+            return .ok
+        }
+
+        /// A dry run in a batch, with the line it was built for.
+        private struct Labelled: Encodable {
+            var input: String
+            var correlationId: String
+            var dryRun: DryRunResult
+        }
     }
 
     // MARK: - send
@@ -163,8 +329,17 @@ enum Run {
             out.print("")
             out.print(preview)
             if let bytes = dry.bodyBytes, bytes > preview.utf8.count {
-                out.print(out.dim("… \(ByteCount.format(bytes)) in total"))
+                out.print(out.dim("… truncated"))
             }
+        }
+        // Always said, so an override that did not take is visible: the line names where the
+        // body came from, not just what it is.
+        if let bytes = dry.bodyBytes, bytes > 0 || dry.bodyOrigin != nil {
+            out.print("")
+            out.print(out.dim(
+                "body: \(bytes) bytes"
+                    + (bytes >= 1024 ? " (\(ByteCount.format(bytes)))" : "")
+                    + ", \(dry.bodyOrigin.map { "from \($0)" } ?? "as saved")"))
         }
         for warning in dry.warnings { out.warning(warning) }
         if !dry.unresolvedVariables.isEmpty {

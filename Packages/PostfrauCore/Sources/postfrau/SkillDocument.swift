@@ -72,6 +72,27 @@ postfrau env ls                                        # what environments exist
 postfrau env use prod_deu                              # or pass --env per command
 ```
 
+## Changing a saved request for one send
+
+Nothing here is saved; the stored request keeps its body. `--dry-run` ends with
+`body: N bytes, from --body` (or `as saved`) — check it says what you meant.
+
+```bash
+postfrau run '<path>' --body @payload.json --dry-run  # replace the body ({{vars}} resolve)
+postfrau run '<path>' --field partner_bank_id=42       # set one JSON field; repeatable
+postfrau run '<path>' -H 'X-Request-ID: abc'           # add or replace a header
+```
+
+`--field` values are JSON when they parse (`42`, `true`, `'id="42"'` for a string of digits),
+text otherwise, and `{{variables}}` resolve first. To run the same request once per id:
+
+```bash
+postfrau run '<path>' --from-file banks.txt --each bank \
+  --field 'partner_bank_id={{bank}}' --correlation-header X-Correlation-ID --json --as claude
+```
+
+One NDJSON line per send, in order, each with `input` and its own `correlationId`.
+
 ## Commands
 
 ```bash
@@ -82,6 +103,7 @@ postfrau get <path> [--var k=v]        # one request, stored + resolved
 
 # Send
 postfrau run <path> [--env E] [--var k=v] [--dry-run] [--fail] [--out f.json]
+postfrau run <path> [--body @f.json] [--field a.b=v] [-H 'k: v']   # this send only
 postfrau run <folder> --all --json     # every request under it, in order
 postfrau send GET https://api.example.com/health
 postfrau send POST https://api.example.com/users \

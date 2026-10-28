@@ -49,6 +49,46 @@ public enum JSONPath {
         return current
     }
 
+    /// `root` with `value` stored at `expression`, for `--field`.
+    ///
+    /// A missing key is created, along with any objects on the way to it. An array index has to
+    /// exist already: growing an array to reach index 7 would invent six elements nobody asked
+    /// for. Nil when the path cannot be followed — through a string, say.
+    public static func setting(
+        _ value: JSONValue, at expression: String, in root: JSONValue
+    ) -> JSONValue? {
+        guard let steps = parse(expression) else { return nil }
+        return setting(value, steps: steps[...], in: root)
+    }
+
+    private static func setting(
+        _ value: JSONValue, steps: ArraySlice<Step>, in node: JSONValue?
+    ) -> JSONValue? {
+        guard let step = steps.first else { return value }
+        switch step {
+        case .key(let name):
+            var object: [String: JSONValue]
+            switch node {
+            case .object(let existing)?: object = existing
+            case nil: object = [:]
+            default: return nil
+            }
+            guard let child = setting(value, steps: steps.dropFirst(), in: object[name]) else {
+                return nil
+            }
+            object[name] = child
+            return .object(object)
+        case .index(let index):
+            guard case .array(var array)? = node else { return nil }
+            let resolved = index < 0 ? array.count + index : index
+            guard array.indices.contains(resolved),
+                  let child = setting(value, steps: steps.dropFirst(), in: array[resolved])
+            else { return nil }
+            array[resolved] = child
+            return .array(array)
+        }
+    }
+
     enum Step: Equatable {
         case key(String)
         case index(Int)

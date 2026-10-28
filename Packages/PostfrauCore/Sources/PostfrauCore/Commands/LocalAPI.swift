@@ -19,6 +19,18 @@ public enum LocalAPI {
 
     public static func defaultURL(port: Int) -> String { "http://127.0.0.1:\(port)" }
 
+    /// What this build of the app understands beyond the original contract, reported by `ping`.
+    ///
+    /// An app that predates a field ignores it — JSON decoding drops unknown keys — so a tool that
+    /// sends `--body` to an older app gets the saved body sent instead, with nothing to say so.
+    /// The tool asks first and refuses rather than let that happen.
+    public static let capabilities = [Capability.requestPatch]
+
+    public enum Capability {
+        /// `RunBody.patch`: `--body`, `--field` and `--header` on `run`.
+        public static let requestPatch = "request-patch"
+    }
+
     /// 32 bytes of `SecRandomCopyBytes`, base64url so it survives a shell without quoting.
     public static func makeToken() -> String {
         var bytes = [UInt8](repeating: 0, count: 32)
@@ -52,9 +64,15 @@ public enum LocalAPI {
     public struct Ping: Codable, Sendable {
         public var version: String
         public var dataFolder: String
-        public init(version: String, dataFolder: String) {
+        /// Nil from an app older than the field, which supports none of them.
+        public var capabilities: [String]?
+        public init(
+            version: String, dataFolder: String,
+            capabilities: [String]? = LocalAPI.capabilities
+        ) {
             self.version = version
             self.dataFolder = dataFolder
+            self.capabilities = capabilities
         }
     }
 
@@ -81,10 +99,14 @@ public enum LocalAPI {
         /// app talking to a newer tool would otherwise silently do the opposite of what was
         /// asked, which for this flag is the dangerous direction.
         public var dryRun: Bool?
+        /// `--body`, `--field`, `--header`. Only sent once `ping` has said the app understands it.
+        public var patch: RequestPatch?
         public init(
             path: String, environment: String? = nil, variables: [String: String]? = nil,
-            captures: [String: String]? = nil, bodyCap: Int? = nil, dryRun: Bool? = nil
+            captures: [String: String]? = nil, bodyCap: Int? = nil, dryRun: Bool? = nil,
+            patch: RequestPatch? = nil
         ) {
+            self.patch = patch
             self.path = path
             self.environment = environment
             self.variables = variables

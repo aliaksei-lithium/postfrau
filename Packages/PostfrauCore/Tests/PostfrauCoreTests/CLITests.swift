@@ -107,6 +107,109 @@ struct CLITests {
         #expect(result.stderr.contains("not available"))
     }
 
+    // MARK: - Changing a saved request for one run
+
+    /// A collection holding `Pay/Create`, a POST whose saved body is the one `--body` replaces.
+    private func preparedPayment(_ root: URL) throws {
+        try prepared(root)
+        try run(["add", "Pay", "--collection"], in: root)
+        try run([
+            "add", "Pay", "--url", "https://pay.test/create", "--name", "Create", "-X", "POST",
+            "--body", #"{"items":[1,2],"partner_bank_id":0}"#,
+        ], in: root)
+    }
+
+    private func decode<T: Decodable>(_ type: T.Type, _ text: some StringProtocol) throws -> T {
+        try JSONDecoder().decode(T.self, from: Data(text.utf8))
+    }
+
+    /// The v3.4 report: the flag was accepted, and the dry run showed the saved `items` body.
+    @Test func runBodyFromAFileReplacesTheSavedBodyInADryRun() throws {
+        let temp = TempDirectory()
+        try preparedPayment(temp.url)
+        let payload = temp.url.appending(path: "payload.json")
+        try Data(#"{"partner_bank_id":{{bank}}}"#.utf8).write(to: payload)
+
+        let json = try run([
+            "--body", "@\(payload.path)", "run", "Pay/Create", "--var", "bank=42",
+            "--dry-run", "--json",
+        ], in: temp.url)
+        #expect(json.code == 0, "\(json.stderr)")
+        let dry = try decode(DryRunResult.self, json.stdout)
+        #expect(dry.bodyPreview == #"{"partner_bank_id":42}"#)
+        #expect(dry.bodyBytes == 22)
+        #expect(dry.bodyOrigin == "--body")
+
+        let text = try run(
+            ["run", "Pay/Create", "--body", "@\(payload.path)", "--var", "bank=42", "--dry-run"],
+            in: temp.url)
+        #expect(text.stdout.contains("body: 22 bytes, from --body"))
+        #expect(!text.stdout.contains("items"))
+
+        let saved = try run(["run", "Pay/Create", "--dry-run"], in: temp.url)
+        #expect(saved.stdout.contains("as saved"))
+
+        let missing = try run(["run", "Pay/Create", "--body", "@/no/such.json"], in: temp.url)
+        #expect(missing.code == ExitCode.usage.rawValue)
+        #expect(missing.stderr.contains("cannot read the body"))
+    }
+
+    @Test func runFromAFileMakesOneRequestPerLine() throws {
+        let temp = TempDirectory()
+        try preparedPayment(temp.url)
+        let banks = temp.url.appending(path: "banks.txt")
+        try Data("# DtBs\n101\n\n202\n".utf8).write(to: banks)
+
+        let result = try run([
+            "run", "Pay/Create", "--from-file", banks.path, "--each", "bank",
+            "--field", "partner_bank_id={{bank}}", "--correlation-header", "X-Correlation-ID",
+            "--dry-run", "--json",
+        ], in: temp.url)
+        #expect(result.code == 0, "\(result.stderr)")
+
+        struct Line: Decodable {
+            var input: String
+            var correlationId: String
+            var dryRun: DryRunResult
+        }
+        let lines = try result.stdout.split(separator: "\n").map { try decode(Line.self, $0) }
+        #expect(lines.map(\.input) == ["101", "202"])
+        #expect(Set(lines.map(\.correlationId)).count == 2, "every send gets its own id")
+        for line in lines {
+            #expect(line.dryRun.bodyPreview == #"{"items":[1,2],"partner_bank_id":\#(line.input)}"#)
+            #expect(line.dryRun.headers.contains {
+                $0.name == "X-Correlation-ID" && $0.value == line.correlationId
+            })
+        }
+    }
+
+    @Test func runRefusesCombinationsThatCannotMeanWhatTheySay() throws {
+        let temp = TempDirectory()
+        try preparedPayment(temp.url)
+
+        let noEach = try run(["run", "Pay/Create", "--from-file", "x.txt"], in: temp.url)
+        #expect(noEach.code == ExitCode.usage.rawValue)
+        #expect(noEach.stderr.contains("--each"))
+
+        let all = try run(["run", "Pay", "--all", "--body", "{}"], in: temp.url)
+        #expect(all.code == ExitCode.usage.rawValue)
+
+        let notJSON = try run(
+            ["run", "Pay/Create", "--body", "plain", "--field", "a=1", "--dry-run"], in: temp.url)
+        #expect(notJSON.code == ExitCode.usage.rawValue)
+        #expect(notJSON.stderr.contains("JSON"))
+    }
+
+    @Test func helpDocumentsTheBodyFlagForRun() throws {
+        let temp = TempDirectory()
+        try prepared(temp.url)
+        #expect(try run(["help"], in: temp.url).stdout.contains("--body, -d"))
+        let runHelp = try run(["run", "--help"], in: temp.url).stdout
+        for flag in ["--body", "--field", "--from-file", "--each", "--correlation-header"] {
+            #expect(runHelp.contains(flag), "run --help mentions \(flag)")
+        }
+    }
+
     @Test func globalFlagsWorkOnEitherSideOfTheVerb() throws {
         let temp = TempDirectory()
         try prepared(temp.url)

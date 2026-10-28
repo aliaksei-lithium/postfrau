@@ -40,6 +40,8 @@ enum Help {
 
         \(out.bold("SENDING"))
           run <path> [--all] [--var k=v] [--capture n=$.a.b] [--dry-run]
+                     [--body text|@file|-] [--field a.b=v] [-H 'k: v']
+                     [--from-file f --each NAME] [--correlation-header H]
                      [--fail] [--max-body 64k] [--out f] [--stop-on-error]
           send <METHOD> <url> [-H 'k: v'] [-d body|@file|-] [--save-to <folder>]
 
@@ -63,6 +65,8 @@ enum Help {
           --json            machine-readable output; run --all emits NDJSON
           --data-dir DIR    which workspace to use
           --env NAME        use this environment for this command
+          --body, -d TEXT|@file|-   the request body: inline, from a file, or stdin.
+                            On `run` it replaces the saved body for this send only
           --as NAME         attribute sends to an agent (or set POSTFRAU_AGENT)
           --record LEVEL    off | metadata | headers | full, for this command
           --reveal          print secret values instead of \(HistoryRedactor.placeholder)
@@ -88,8 +92,25 @@ enum Help {
             postfrau run <path> [options]
 
               --all             every request under a folder, in order
-              --stop-on-error   with --all, stop at the first failure
+              --stop-on-error   with --all or --from-file, stop at the first failure
               --var k=v         override a variable; repeatable
+
+            Changing the saved request for this send only (nothing is saved):
+              --body TEXT | @file | -   replace the body; -d is the same flag.
+                                {{variables}} in it resolve, so a file can be a template
+              --field a.b=v     set one field of the JSON body; repeatable. The value is
+                                JSON if it parses (42, true, "42", {"x":1}), else a string,
+                                and {{variables}} resolve first: --field id={{bank}}
+              -H 'k: v'         add a header, or replace one of the same name
+
+            One request per line of a file:
+              --from-file FILE  run once per non-blank line (# starts a comment); - is stdin
+              --each NAME       the variable each line is stored in
+              --correlation-header H   send each run's generated id in header H; the id
+                                is also {{correlation_id}}. With --json: NDJSON, one line
+                                per send, carrying input and correlationId
+
+            Responses:
               --capture n=$.a.b store a value from the response in the active environment
               --secret          store captured values as secrets
               --dry-run         print what would be sent; writes no history
@@ -99,6 +120,15 @@ enum Help {
 
             A capture from one request is visible to the next, which is what makes
             `run --all` useful: log in, capture the token, call the endpoint.
+
+            --dry-run prints the body that would go out, its size in bytes, and
+            where it came from ("as saved", "from --body", "from --field id").
+
+            Examples:
+              postfrau run "Payments/Create" --body @payload.json --dry-run
+              postfrau run "Payments/Create" --field partner_bank_id=42
+              postfrau run "Payments/Create" --from-file banks.txt --each bank \\
+                  --field partner_bank_id={{bank}} --correlation-header X-Correlation-ID --json
             """)
         case "send":
             out.print("""

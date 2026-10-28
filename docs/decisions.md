@@ -1223,3 +1223,31 @@ painted on top of each other until something else forced a layout. `SidebarRelay
 the table for layout. It never touches off-screen rows, so it costs the same for a 5 000-request
 collection as for a small one, and it lives in a view of its own so an expansion re-evaluates
 nothing else.
+
+## D64 — `run` takes a body, field and header patch, and can run once per line of a file
+
+`run --body @payload.json` parsed and was then ignored on both paths: the local `run` never read
+the flag, and the Local API `RunBody` had no field for it, so the dry run showed — and a real run
+sent — the saved body. Every change to a saved request for one send is now a `RequestPatch` in
+Core (`--body`, `--field path=value`, `-H`), applied by `CommandRunner` after the variable scope
+is built and before `RequestBuilder`, identically for the local path and for `/v1/run`. Nothing
+is saved; history records the patched request, because that is what went out.
+
+`--field` resolves `{{variables}}` in the body *before* parsing it as JSON, since a saved body like
+`{"id": {{id}}}` is only JSON once filled in. The re-encoded body has sorted keys and no
+whitespace. A missing key is created; an array index must exist. This covers the "body template"
+request without a new flag: `--body @template.json` already resolves `{{vars}}`, and `--field`
+handles the case where the saved body has no placeholder to fill.
+
+An app older than this ignores the unknown `patch` key and would send the saved body, which is the
+original bug in a new place. `Ping` now lists `capabilities`; the tool pings before sending a patch
+and refuses when `request-patch` is missing. Nil capabilities means none.
+
+`run <path> --from-file FILE --each NAME` sends the request once per non-blank, non-`#` line,
+sequentially, with the line in `{{NAME}}`. Each send gets a fresh UUID as `{{correlation_id}}`
+(unless `--var` sets one) and, with `--correlation-header H`, in header `H`. With `--json` it
+streams NDJSON: a `RunResult` per send with `input` and `correlationId` set, or under `--dry-run`
+`{input, correlationId, dryRun}`. It runs in the tool, so it works the same through the Local API.
+`--body`/`--field` are refused with `--all`: one body for every request in a folder is never meant.
+
+The dry run now always ends with `body: N bytes, from --body` or `as saved` when there is a body.

@@ -57,7 +57,7 @@ Compose a request, organise it, send it, read the response — the whole loop.
   the same data folder the app is using, writes to the same history, and attributes every send —
   `--as claude` shows up in the app's sidebar with a badge. `--capture token='$.data.token'`
   pulls a value out of a response into the active environment, so a folder can log in and then
-  work. `--dry-run` prints what would go on the wire and records nothing; `--json` is a stable
+  work. `--dry-run` prints what would go on the wire — including the body's size and whether it came from `--body`/`--field` or is as saved — and records nothing; `run --body @f`, `--field a.b=v` and `-H` change a saved request for one send (also through the Local API), and `run --from-file ids.txt --each id` sends it once per line with a correlation id each (D64); `--json` is a stable
   shape, and `run --all` emits NDJSON. `postfrau skill install` writes the `SKILL.md` an agent
   reads, generated from the same text compiled into the binary so the two cannot disagree.
 - **Import and export**: Postman v2.1 collections in both directions, Postman environments

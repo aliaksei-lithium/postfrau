@@ -20,7 +20,8 @@ enum CLI {
         "--about", "--agent", "--as", "--auth", "--body", "-d", "--capture", "--data-dir",
         "--env", "--file", "--from-curl", "--header", "-H", "--last", "--max-body", "--method",
         "-X", "--name", "--out", "--param", "--record", "--save-to", "--since", "--status",
-        "--to", "--url", "--var", "--limit",
+        "--to", "--url", "--var", "--limit", "--field", "--from-file", "--each",
+        "--correlation-header",
     ]
 
     static func run(_ arguments: [String]) async -> ExitCode {

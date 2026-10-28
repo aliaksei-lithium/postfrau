@@ -81,13 +81,51 @@ enum RemoteAPI {
                     out.error("run needs a path to a saved request.")
                     return .usage
                 }
-                let body = LocalAPI.RunBody(
-                    path: path,
-                    environment: arguments.value("--env"),
-                    variables: pairs(arguments, "--var"),
-                    captures: pairs(arguments, "--capture"),
-                    bodyCap: arguments.value("--max-body").flatMap { Arguments.byteCount($0) },
-                    dryRun: arguments.has("--dry-run"))
+                if let problem = Run.conflict(in: arguments) {
+                    out.error(problem)
+                    return .usage
+                }
+                let patch = try Run.patch(from: arguments)
+                let batch = try Run.Batch(arguments)
+                // An app older than the patch would decode the request without it and send the
+                // saved body — the very thing the caller was overriding. Ask before sending.
+                if !patch.isEmpty || batch?.correlationHeader != nil {
+                    let ping: LocalAPI.Ping = try await get("/v1/ping", [:], endpoint)
+                    guard ping.capabilities?.contains(LocalAPI.Capability.requestPatch) == true
+                    else {
+                        out.error(
+                            "the running Postfrau (\(ping.version)) is older than this tool and "
+                                + "would ignore --body, --field and -H on run, sending the saved "
+                                + "request instead. Update the app, or use `send` with the full "
+                                + "request.")
+                        return .usage
+                    }
+                }
+                func runBody(
+                    _ variables: [String: String]?, _ patch: RequestPatch, dryRun: Bool
+                ) -> LocalAPI.RunBody {
+                    LocalAPI.RunBody(
+                        path: path,
+                        environment: arguments.value("--env"),
+                        variables: variables,
+                        captures: pairs(arguments, "--capture"),
+                        bodyCap: arguments.value("--max-body").flatMap { Arguments.byteCount($0) },
+                        dryRun: dryRun,
+                        patch: patch.isEmpty ? nil : patch)
+                }
+
+                if let batch {
+                    return try await batch.run(
+                        arguments, overrides: pairs(arguments, "--var") ?? [:], patch: patch, out
+                    ) { variables, patch, dryRun in
+                        let body = runBody(variables, patch, dryRun: dryRun)
+                        if dryRun { return .dry(try await post("/v1/run", body, endpoint)) }
+                        return .sent(try await post("/v1/run", body, endpoint))
+                    }
+                }
+
+                let body = runBody(
+                    pairs(arguments, "--var"), patch, dryRun: arguments.has("--dry-run"))
                 if arguments.has("--dry-run") {
                     let dry: DryRunResult = try await post("/v1/run", body, endpoint)
                     Run.report(dry, out)
@@ -107,7 +145,7 @@ enum RemoteAPI {
                     method: method, url: url,
                     headers: arguments.colonPairs("--header", "-H")
                         .map { HeaderField(name: $0.0, value: $0.1) },
-                    body: arguments.value("--body") ?? arguments.value("-d"),
+                    body: try Edit.readBodyText(arguments),
                     environment: arguments.value("--env"),
                     variables: pairs(arguments, "--var"),
                     captures: pairs(arguments, "--capture"),
@@ -127,6 +165,9 @@ enum RemoteAPI {
         } catch let error as Failure {
             out.error(error.message)
             return error.code
+        } catch let error as CommandRunner.CommandError {
+            out.error(CommandRunner.message(for: error))
+            return .usage
         } catch {
             out.error(error.localizedDescription)
             return .transport
