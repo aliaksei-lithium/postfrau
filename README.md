@@ -68,6 +68,23 @@ postfrau send POST https://api.example.com/users -H 'Content-Type: application/j
 postfrau history --last 20
 ```
 
+`run` can change a saved request for one send, without saving anything — check it first with
+`--dry-run`, which prints the body, its size, and whether it is as saved or from `--body`:
+
+```bash
+postfrau run 'Payments/Create' --body @payload.json --dry-run   # replace the body; {{vars}} resolve
+postfrau run 'Payments/Create' --field partner_bank_id=42        # set one JSON field
+postfrau run 'Payments/Create' -H 'X-Request-ID: abc'            # add or replace a header
+```
+
+And send the same request once per line of a file — one NDJSON line per send with `--json`,
+each carrying its input and its own correlation id:
+
+```bash
+postfrau run 'Payments/Create' --from-file banks.txt --each bank \
+  --field 'partner_bank_id={{bank}}' --correlation-header X-Correlation-ID --json
+```
+
 Install it from **Settings ▸ Advanced**, or `make install` from a checkout.
 
 For agents: `postfrau skill install --to .claude/skills/postfrau` writes a `SKILL.md` with the
@@ -81,7 +98,7 @@ Needs macOS 26, Xcode 26 and [XcodeGen](https://github.com/yonaskolb/XcodeGen). 
 make gen      # generate the Xcode project
 make build    # app + CLI
 make run
-make test     # 532 Core tests + app tests
+make test     # 562 Core tests + app tests
 make release  # signed DMG in dist/
 ```
 
