@@ -130,13 +130,21 @@ public actor CommandRunner {
     }
 
     /// Fills in secret values from the overrides, and from the Keychain when that was asked for.
+    ///
+    /// Whatever the data folder holds for a secret is never used. The app writes a blank there and
+    /// keeps the value in the Keychain, and reads only the Keychain back — so a value in the file
+    /// is one the app has stopped looking at: left by an older build, an import, a hand edit.
+    /// The CLI used to send it whenever it was there, without asking the Keychain even under
+    /// `--keychain` and without a warning, so a token renewed in the app kept going out stale.
+    /// Now the CLI reads a secret exactly where the app does, or says it cannot.
     private func hydrate(_ variables: [Variable], scope: UUID) async -> [Variable] {
         var filled = variables
         var missing: [String] = []
-        for index in filled.indices where filled[index].isSecret {
+        for index in filled.indices where filled[index].isSecret && !filled[index].key.isEmpty {
             if let supplied = secretOverrides[filled[index].key] {
                 filled[index].value = supplied
-            } else if filled[index].value.isEmpty {
+            } else {
+                filled[index].value = ""
                 missing.append(filled[index].key)
             }
         }
@@ -146,11 +154,28 @@ public actor CommandRunner {
             unavailableSecrets.append(contentsOf: missing)
             return filled
         }
-        let hydrated = await secrets.hydrate(filled, scope: scope)
-        unavailableSecrets.append(contentsOf: hydrated.filter {
-            $0.isSecret && $0.value.isEmpty
+        for index in filled.indices where missing.contains(filled[index].key) {
+            filled[index].value = (try? await secrets.value(scope: scope, key: filled[index].key))
+                ?? nil ?? ""
+        }
+        unavailableSecrets.append(contentsOf: filled.filter {
+            $0.isSecret && missing.contains($0.key) && $0.value.isEmpty
         }.map(\.key))
-        return hydrated
+        return filled
+    }
+
+    /// A sentence for each secret `scope` uses that has no value, for a result's `warnings` — so
+    /// a caller reading only `--json` learns why its request went out with an empty token.
+    func secretWarnings(for scope: VariableScope) -> [String] {
+        let missing = Set(unavailableSecrets)
+        guard !missing.isEmpty else { return [] }
+        let used = Set(scope.effectiveValues().keys)
+        return missing.intersection(used).sorted().map { name in
+            "no value for secret “\(name)”: secrets are kept in the Keychain"
+                + (usesKeychain
+                    ? ", which has none for it on this Mac."
+                    : ". Pass --keychain to read it, or set POSTFRAU_SECRET_\(name.uppercased()).")
+        }
     }
 
     // MARK: - Saving

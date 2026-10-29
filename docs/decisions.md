@@ -1251,3 +1251,19 @@ streams NDJSON: a `RunResult` per send with `input` and `correlationId` set, or 
 `--body`/`--field` are refused with `--all`: one body for every request in a folder is never meant.
 
 The dry run now always ends with `body: N bytes, from --body` or `as saved` when there is a body.
+
+## D65 — The CLI reads a secret only from the Keychain, like the app, and says so under `--json`
+
+A token renewed in the app kept going out stale from the CLI. The app hydrates every secret from
+the Keychain and ignores the environment file; the CLI only consulted the Keychain when the file's
+value was empty. A file that still held a value — left by an older build, an import, a hand edit;
+the app writes blanks but never rewrites a file just because a secret changed — was sent as is,
+even under `--keychain`, and nothing said so. The CLI now discards a secret's on-disk value and
+fills it from `POSTFRAU_SECRET_<KEY>`, then the Keychain when `--keychain` allows, else leaves it
+empty.
+
+The second half was that nothing told the caller. `Output.warning` returned early under `--json`,
+which is how agents call the tool, so "no value for token" reached only people who did not need it.
+Warnings now always go to stderr (stdout stays valid JSON), and `run`/`send`/`--dry-run` results
+carry a `warnings` entry for each secret their scope uses that has no value — next to the request
+it affected. The end-of-command summary no longer repeats it for those verbs.

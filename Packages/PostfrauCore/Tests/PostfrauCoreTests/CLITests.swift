@@ -343,6 +343,51 @@ struct CLITests {
         #expect(missing.stderr.contains("no value for token"))
     }
 
+    /// The reported bug: a token renewed in the app, and the CLI kept sending the old one.
+    ///
+    /// The app keeps a secret in the Keychain and ignores whatever the environment file holds; the
+    /// CLI used the file's value whenever there was one — silently, and under `--json` (how
+    /// agents call it) every warning was dropped too.
+    @Test func aSecretLeftInTheEnvironmentFileIsNeverSent() throws {
+        let temp = TempDirectory()
+        try prepared(temp.url)
+        try run(["add", "Acme", "--collection"], in: temp.url)
+        try run([
+            "add", "Acme", "--url", "https://api.test/{{token}}", "--name", "Thing",
+        ], in: temp.url)
+        try run(["env", "add", "Prod"], in: temp.url)
+
+        // As an older build or a hand edit leaves it: the value written into the file.
+        let directory = temp.url.appending(path: "data/environments")
+        let files = try FileManager.default.contentsOfDirectory(atPath: directory.path)
+        let url = directory.appending(path: try #require(files.first))
+        var environment = try Postfrau.makeDecoder()
+            .decode(RequestEnvironment.self, from: Data(contentsOf: url))
+        environment.variables = [Variable(key: "token", value: "stale-on-disk", isSecret: true)]
+        let encoder = Postfrau.makeEncoder()
+        encoder.userInfo[.includeSecretValues] = true
+        try encoder.encode(environment).write(to: url)
+
+        let dry = try run(
+            ["--env", "Prod", "run", "Acme/Thing", "--dry-run", "--json"], in: temp.url)
+        #expect(dry.code == 0, "\(dry.stderr)")
+        let result = try JSONDecoder().decode(DryRunResult.self, from: Data(dry.stdout.utf8))
+        #expect(!result.url.contains("stale-on-disk"))
+        #expect(result.warnings.contains { $0.contains("no value for secret “token”") },
+                "the reason is in the JSON an agent reads")
+
+        let supplied = try run(
+            ["--env", "Prod", "run", "Acme/Thing", "--dry-run", "--json"], in: temp.url,
+            environment: ["POSTFRAU_SECRET_token": "fresh"])
+        let fresh = try JSONDecoder().decode(DryRunResult.self, from: Data(supplied.stdout.utf8))
+        #expect(fresh.url == "https://api.test/fresh")
+        #expect(fresh.warnings.isEmpty)
+
+        let get = try run(["--env", "Prod", "get", "Acme/Thing", "--json"], in: temp.url)
+        #expect(!get.stdout.contains("stale-on-disk"))
+        #expect(get.stderr.contains("no value for token"), "warnings reach stderr under --json")
+    }
+
     /// Every flag that carries a value has to be declared as one.
     ///
     /// A flag that is missing from that list is not an error anywhere: it parses as a boolean,

@@ -38,8 +38,11 @@ struct Output: Sendable {
         FileHandle.standardError.write(Data(("postfrau: " + text + "\n").utf8))
     }
 
+    /// Always stderr, so it never breaks `--json` on stdout — and printed under `--json` too.
+    /// It used to be dropped there, and `--json` is how agents call this tool: a run that went
+    /// out with an empty token said so to everyone except the caller that needed to know.
     func warning(_ text: String) {
-        guard !isQuiet, !isJSON else { return }
+        guard !isQuiet else { return }
         FileHandle.standardError.write(Data((dim("warning: " + text) + "\n").utf8))
     }
 

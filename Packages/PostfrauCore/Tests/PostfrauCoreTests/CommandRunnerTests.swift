@@ -424,6 +424,37 @@ struct CommandRunnerTests {
         #expect(unchanged.body.text == #"{"name":"a"}"#, "a patch is for one send, never saved")
     }
 
+    /// With `--keychain`, the Keychain wins over a value left in the environment file — the
+    /// same place the app reads, so a token renewed in the app is the one the CLI sends.
+    @Test func theKeychainBeatsAValueLeftOnDisk() async throws {
+        guard KeychainProbe.isKeychainUsable else { return }
+        let temp = TempDirectory()
+        let folder = DataFolder(root: temp.url.appending(path: "Data"), needsCoordination: false)
+        try folder.prepare()
+        let store = WorkspaceStore(dataFolder: folder, localRoot: temp.url)
+        try await store.save(collection: makeSampleCollection())
+        let environment = RequestEnvironment(
+            name: "Prod", variables: [Variable(key: "baseUrl", value: "https://{{token}}.test")])
+        let encoder = Postfrau.makeEncoder()
+        encoder.userInfo[.includeSecretValues] = true
+        var stale = environment
+        stale.variables.append(Variable(key: "token", value: "stale", isSecret: true))
+        try encoder.encode(stale).write(to: folder.environmentFile(environment.id))
+
+        let secrets = SecretsStore(service: "com.postfrau.tests.\(UUID())")
+        try await secrets.setValue("fresh", scope: environment.id, key: "token")
+        defer { Task { try? await secrets.delete(scope: environment.id, key: "token") } }
+        let runner = CommandRunner(
+            store: store, history: HistoryStore(root: temp.url.appending(path: "history")),
+            secrets: secrets)
+        await runner.setUsesKeychain(true)
+        _ = try await runner.useEnvironment(named: "Prod")
+
+        let dry = try await runner.dryRun(requestAt: "Acme API/Health")
+        #expect(dry.url == "https://fresh.test/health")
+        #expect(dry.warnings.isEmpty)
+    }
+
     @Test func runSendsAndRecordsWithAttribution() async throws {
         let temp = TempDirectory()
                 CommandStubProtocol.stub(.init(body: Data(#"{"ok":true}"#.utf8)))

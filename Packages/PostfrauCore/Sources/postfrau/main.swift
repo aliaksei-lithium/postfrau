@@ -133,7 +133,10 @@ enum CLI {
     /// Every command hydrates the workspace, so a missing secret is noticed whatever was asked
     /// for — but warning about a token while listing or searching is noise in front of the answer,
     /// and to an agent reading the output it looks like something went wrong with the search.
-    private static let verbsThatUseSecrets: Set<String> = ["get", "run", "send", "env"]
+    ///
+    /// `run` and `send` are not here: their results carry the warning themselves, in `warnings`,
+    /// next to the request it affected — and in the JSON an agent actually reads.
+    private static let verbsThatUseSecrets: Set<String> = ["get", "env"]
 
     /// Says once, at the end, that a secret could not be supplied — rather than letting the user
     /// puzzle over a request that went out with an empty token.

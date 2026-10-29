@@ -96,7 +96,7 @@ extension CommandRunner {
             bodyPreview: preview,
             bodyBytes: bytes,
             bodyOrigin: patch.bodyOrigin,
-            warnings: built.warnings,
+            warnings: built.warnings + secretWarnings(for: variableScope),
             unresolvedVariables: resolver.resolve(request.url).unresolved)
     }
 
@@ -243,7 +243,8 @@ extension CommandRunner {
                 durationMs: received.timing.totalMilliseconds, bytes: received.byteCount,
                 headers: received.headers, body: String(decoding: data, as: UTF8.self),
                 bodyTruncated: received.byteCount > data.count,
-                error: nil, captured: [:], warnings: built.warnings)
+                error: nil, captured: [:],
+                warnings: built.warnings + secretWarnings(for: variableScope))
         } catch {
             result = RunResult(
                 path: path, name: request.name, method: request.method.rawValue,
@@ -251,7 +252,7 @@ extension CommandRunner {
                 durationMs: Date().timeIntervalSince(started) * 1000, bytes: 0,
                 headers: [], body: nil, bodyTruncated: false,
                 error: CommandRunner.message(for: error), captured: [:],
-                warnings: built.warnings)
+                warnings: built.warnings + secretWarnings(for: variableScope))
         }
 
         // Whatever happened is history before anything else can go wrong.

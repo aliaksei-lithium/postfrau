@@ -186,7 +186,9 @@ check that switch — do not copy their files somewhere readable.
 
 - `postfrau version` — which data folder, and where it came from; or which app, with a token set.
 - Exit 5 — folder unavailable. Unreadable rather than wrong? Use the local API above.
-- A secret that will not resolve is usually an unanswered Keychain prompt: pass
-  `POSTFRAU_SECRET_<KEY>=value` in the environment for that one command.
+- Secrets (tokens) are read only from the Keychain, where the app keeps them — never from the
+  workspace files. Without `--keychain` a secret has no value, and `warnings` in the `--json`
+  result says `no value for secret "token"`. Check `warnings` before trusting a 401: add
+  `--keychain` (macOS may ask the user once), or pass `POSTFRAU_SECRET_<KEY>=value` for one command.
 - `find` ranks; it does not require every word. The best match is first, so read the descriptions
   before picking. Nothing at all (exit 2) means try fewer or different words — never guess a path.
