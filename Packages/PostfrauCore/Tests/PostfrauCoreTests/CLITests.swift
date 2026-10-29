@@ -537,6 +537,48 @@ struct CLITests {
         #expect(try run(["ls"], in: temp.url).stdout.contains("Acme API"))
     }
 
+    @Test func importReadsAYamlSpecAndUpdatesFromANewerOne() throws {
+        let temp = TempDirectory()
+        try prepared(temp.url)
+        let file = temp.url.appending(path: "pets.yaml")
+        try fixture("petstore.openapi.yaml").write(to: file)
+
+        let first = try run(["import", file.path], in: temp.url)
+        #expect(first.code == 0, "\(first.stderr)")
+        #expect(try run(["ls"], in: temp.url).stdout.contains("Acme Pets"))
+
+        // A newer spec: one operation gone, one added.
+        var text = try String(contentsOf: file, encoding: .utf8)
+        text = text.replacingOccurrences(of: "  /health:\n    get:\n      summary: Health", with: """
+          /status:
+            get:
+              summary: Status
+        """)
+        try Data(text.utf8).write(to: file)
+
+        let dry = try run(["import", file.path, "--into", "Acme Pets", "--dry-run", "--json"], in: temp.url)
+        #expect(dry.code == 0, "\(dry.stderr)")
+        #expect(dry.stdout.contains(#""dryRun":true"#) || dry.stdout.contains(#""dryRun" : true"#))
+        #expect(dry.stdout.contains("Status"))
+        #expect(!(try run(["ls", "Acme Pets"], in: temp.url).stdout.contains("Status")),
+                "a dry run saves nothing")
+
+        let applied = try run(["import", file.path, "--into", "Acme Pets"], in: temp.url)
+        #expect(applied.code == 0, "\(applied.stderr)")
+        #expect(applied.stdout.contains("1 added"))
+        let tree = try run(["ls", "Acme Pets", "--tree"], in: temp.url).stdout
+        #expect(tree.contains("Status"))
+        #expect(tree.contains(OpenAPISync.removedFolderName))
+    }
+
+    @Test func importHelpMentionsYamlAndUpdating() throws {
+        let temp = TempDirectory()
+        try prepared(temp.url)
+        let help = try run(["import", "--help"], in: temp.url).stdout
+        #expect(help.contains("YAML"))
+        #expect(help.contains("--into"))
+    }
+
     @Test func exportRoundTripsThroughTheCommandLine() throws {
         let temp = TempDirectory()
         try prepared(temp.url)

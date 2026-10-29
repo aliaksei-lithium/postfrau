@@ -8,9 +8,11 @@ import Foundation
 /// example the spec gives — or synthesised from its schema when it gives none, because an empty
 /// body is far less use than a shaped one you can edit.
 ///
-/// JSON only. OpenAPI is as often YAML, but a YAML parser is a third-party dependency (`PLAN.md`
-/// §0) and the subset needed here is not small enough to hand-roll honestly. A YAML document is
-/// detected and says what to do about it rather than failing obscurely.
+/// JSON or YAML: a YAML document goes through `YAML`, a hand-written reader for the subset spec
+/// files use (`PLAN.md` §0 rules out a package), into the same `JSONValue` the JSON path makes.
+///
+/// Every request is stamped with its operation and what the spec said, so a later version of the
+/// same spec can be merged in with `OpenAPISync.update` without losing the user's edits.
 public struct OpenAPIImporter: Sendable {
     public init() {}
 
@@ -26,17 +28,16 @@ public struct OpenAPIImporter: Sendable {
 
     public enum ImportError: Error, LocalizedError, Equatable {
         case notJSON
-        case looksLikeYAML
+        case invalidYAML(String)
         case notOpenAPI
         case swagger2
 
         public var errorDescription: String? {
             switch self {
             case .notJSON:
-                "That file is not JSON."
-            case .looksLikeYAML:
-                "That looks like a YAML OpenAPI document. Postfrau reads the JSON form — convert "
-                    + "it first, for example with `yq -o=json spec.yaml > spec.json`."
+                "That file is neither JSON nor YAML."
+            case .invalidYAML(let message):
+                "That looks like a YAML OpenAPI document, but it could not be read: \(message)"
             case .notOpenAPI:
                 "That does not look like an OpenAPI document — it has no “openapi” version and "
                     + "no “paths”."
@@ -50,12 +51,22 @@ public struct OpenAPIImporter: Sendable {
     // MARK: - Entry points
 
     public func `import`(_ data: Data) throws -> Result {
-        guard let root = try? Postfrau.makeDecoder().decode(JSONValue.self, from: data),
-              let object = root.objectValue
-        else {
-            throw Self.looksLikeYAML(data) ? ImportError.looksLikeYAML : ImportError.notJSON
+        try `import`(Self.document(from: data))
+    }
+
+    /// The top-level object of a JSON or YAML document.
+    public static func document(from data: Data) throws -> [String: JSONValue] {
+        if let root = try? Postfrau.makeDecoder().decode(JSONValue.self, from: data),
+           let object = root.objectValue {
+            return object
         }
-        return try `import`(object)
+        guard looksLikeYAML(data) else { throw ImportError.notJSON }
+        do {
+            guard let object = try YAML.parse(data).objectValue else { throw ImportError.notOpenAPI }
+            return object
+        } catch let error as YAML.ParseError {
+            throw ImportError.invalidYAML(error.localizedDescription)
+        }
     }
 
     public func `import`(_ document: [String: JSONValue]) throws -> Result {
@@ -83,6 +94,7 @@ public struct OpenAPIImporter: Sendable {
             in: document, resolver: resolver, warnings: &warnings)
         guard !operations.isEmpty else {
             warnings.append("The document has no operations under “paths”.")
+            OpenAPISync.stamp(&collection)
             return Result(collection: collection, warnings: warnings)
         }
         collection.items = Self.group(operations, declaredTags: Self.declaredTags(document))
@@ -100,6 +112,7 @@ public struct OpenAPIImporter: Sendable {
         collection.extras = document.filter {
             !["openapi", "info", "servers", "paths", "components", "security"].contains($0.key)
         }
+        OpenAPISync.stamp(&collection)
         return Result(collection: collection, warnings: warnings)
     }
 
@@ -113,7 +126,7 @@ public struct OpenAPIImporter: Sendable {
         return object["paths"]?.objectValue != nil && object["item"] == nil
     }
 
-    /// A cheap check for the YAML form, so the error can say what to do about it.
+    /// A cheap check for the YAML form of an OpenAPI document, so it is not mistaken for prose.
     public static func looksLikeYAML(_ data: Data) -> Bool {
         let head = String(decoding: data.prefix(2048), as: UTF8.self)
         guard !head.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("{") else {
@@ -262,6 +275,7 @@ public struct OpenAPIImporter: Sendable {
         }
         if let responses = operation["responses"] { extras["responses"] = responses }
         request.extras = extras
+        OpenAPISync.stamp(&request, operation: OpenAPISync.operationKey(method: method, path: path))
 
         return Operation(
             request: request,

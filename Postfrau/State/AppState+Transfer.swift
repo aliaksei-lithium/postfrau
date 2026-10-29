@@ -10,6 +10,17 @@ extension AppState {
         var warnings: [String]
     }
 
+    /// An OpenAPI spec whose title matches a collection that is already here: the user is asked
+    /// whether it is a newer version of that one or a separate collection.
+    struct PendingSpecUpdate: Identifiable {
+        let id = UUID()
+        var incoming: RequestCollection
+        var warnings: [String]
+        var targetID: UUID
+        var targetName: String
+        var fileName: String
+    }
+
     // MARK: - Importing
 
     /// File ▸ Import…: one panel for every format Postfrau reads.
@@ -40,19 +51,20 @@ extension AppState {
         let outcome = await Self.decodeImport(data, named: name)
 
         switch outcome {
-        case .collection(let collection, let warnings):
-            workspace.collections.append(collection)
-            workspace.collections.sort {
-                $0.name.localizedStandardCompare($1.name) == .orderedAscending
+        case .openAPI(let collection, let warnings):
+            // The same API again is far more often a newer spec than a second copy, so ask.
+            if let existing = workspace.collections.first(where: {
+                $0.name.localizedCaseInsensitiveCompare(collection.name) == .orderedSame
+            }) {
+                pendingSpecUpdate = PendingSpecUpdate(
+                    incoming: collection, warnings: warnings, targetID: existing.id,
+                    targetName: existing.name, fileName: name)
+            } else {
+                addImportedCollection(collection, warnings: warnings, from: name)
             }
-            expandedIDs.insert(collection.id)
-            markDirty(collection: collection.id)
-            invalidateSidebarCache()
-            sidebarSection = .collections
-            importReport = ImportReport(
-                title: "Imported “\(collection.name)”",
-                detail: "\(collection.requestCount) request(s) in \(name).",
-                warnings: warnings)
+
+        case .collection(let collection, let warnings):
+            addImportedCollection(collection, warnings: warnings, from: name)
 
         case .environment(let environment):
             workspace.environments.append(environment)
@@ -85,9 +97,107 @@ extension AppState {
         }
     }
 
+    func addImportedCollection(_ collection: RequestCollection, warnings: [String], from name: String) {
+        workspace.collections.append(collection)
+        workspace.collections.sort {
+            $0.name.localizedStandardCompare($1.name) == .orderedAscending
+        }
+        expandedIDs.insert(collection.id)
+        markDirty(collection: collection.id)
+        invalidateSidebarCache()
+        sidebarSection = .collections
+        importReport = ImportReport(
+            title: "Imported “\(collection.name)”",
+            detail: "\(collection.requestCount) request(s) in \(name).",
+            warnings: warnings)
+    }
+
+    /// Answers `pendingSpecUpdate`: merge into the matching collection, or add a new one.
+    func resolvePendingSpecUpdate(updating: Bool) {
+        guard let pending = pendingSpecUpdate else { return }
+        pendingSpecUpdate = nil
+        if updating {
+            Task {
+                await applySpecUpdate(
+                    pending.incoming, warnings: pending.warnings, into: pending.targetID,
+                    from: pending.fileName)
+            }
+        } else {
+            addImportedCollection(pending.incoming, warnings: pending.warnings, from: pending.fileName)
+        }
+    }
+
+    // MARK: - Updating from OpenAPI
+
+    /// The collection menu's Update from OpenAPI…: a newer spec merged into this collection.
+    func runUpdateFromOpenAPIPanel(collectionID: UUID) {
+        guard let url = FileDialogs.chooseOpenAPISpec() else { return }
+        Task { await updateCollection(collectionID, fromSpecAt: url) }
+    }
+
+    func updateCollection(_ collectionID: UUID, fromSpecAt url: URL) async {
+        let didOpen = url.startAccessingSecurityScopedResource()
+        defer { if didOpen { url.stopAccessingSecurityScopedResource() } }
+        let name = url.lastPathComponent
+        guard let data = try? Data(contentsOf: url) else {
+            importReport = ImportReport(
+                title: "Could not read the file",
+                detail: "Postfrau could not open “\(name)”.", warnings: [])
+            return
+        }
+        switch await Self.decodeImport(data, named: name) {
+        case .openAPI(let incoming, let warnings):
+            await applySpecUpdate(incoming, warnings: warnings, into: collectionID, from: name)
+        case .failure(let message):
+            importReport = ImportReport(title: "Could not read \(name)", detail: message, warnings: [])
+        default:
+            importReport = ImportReport(
+                title: "\(name) is not an OpenAPI document",
+                detail: "Update from OpenAPI reads an OpenAPI 3 spec, in JSON or YAML.",
+                warnings: [])
+        }
+    }
+
+    /// Merges a newer spec into a collection as one undoable step, and reports what changed.
+    ///
+    /// Dropped operations are moved to a folder rather than deleted: nothing the user typed is
+    /// lost by an update, and deleting the folder afterwards is one click. See D66.
+    func applySpecUpdate(
+        _ incoming: RequestCollection, warnings: [String], into collectionID: UUID,
+        from name: String
+    ) async {
+        guard let existing = workspace.collection(withID: collectionID) else { return }
+        let (merged, report) = await Self.mergeSpec(existing, incoming)
+        // The workspace may have moved on while the merge ran; a stale result would undo that.
+        guard workspace.collection(withID: collectionID) == existing else {
+            importReport = ImportReport(
+                title: "“\(existing.name)” changed during the update",
+                detail: "Nothing was applied. Try again.", warnings: [])
+            return
+        }
+        replace(collection: merged, actionName: "Update from OpenAPI")
+        invalidateSidebarCache()
+        expandedIDs.insert(collectionID)
+        sidebarSection = .collections
+        importReport = ImportReport(
+            title: "Updated “\(merged.name)” from \(name)",
+            detail: report.summary + ".",
+            warnings: warnings + report.details)
+    }
+
+    @concurrent
+    static func mergeSpec(
+        _ existing: RequestCollection, _ incoming: RequestCollection
+    ) async -> (RequestCollection, OpenAPISync.Report) {
+        let (merged, report) = OpenAPISync.update(existing, from: incoming)
+        return (merged, report)
+    }
+
     /// The formats File ▸ Import understands.
     enum ImportOutcome: Sendable {
         case collection(RequestCollection, warnings: [String])
+        /// A collection read from an OpenAPI document, which can also update an existing one.
+        case openAPI(RequestCollection, warnings: [String])
         case environment(RequestEnvironment)
         case request(RequestItem, warnings: [String])
         case failure(String)
@@ -96,11 +206,14 @@ extension AppState {
     /// Sniffing and parsing, off the main thread: a large Postman export is a real parse.
     @concurrent
     static func decodeImport(_ data: Data, named name: String) async -> ImportOutcome {
-        // A YAML OpenAPI document is neither curl nor JSON; say what to do about it rather than
-        // letting it fall through to "this is not JSON".
+        // A YAML OpenAPI document is neither curl nor JSON.
         if OpenAPIImporter.looksLikeYAML(data) {
-            return .failure(
-                OpenAPIImporter.ImportError.looksLikeYAML.localizedDescription)
+            do {
+                let result = try OpenAPIImporter().import(data)
+                return .openAPI(result.collection, warnings: result.warnings)
+            } catch {
+                return .failure(message(for: error))
+            }
         }
 
         // curl first: a saved command is text, and text is never valid JSON here.
@@ -117,7 +230,7 @@ extension AppState {
               let object = root.objectValue
         else {
             return .failure(
-                "“\(name)” is neither JSON nor a curl command.")
+                "“\(name)” is not JSON, YAML or a curl command.")
         }
 
         if PostmanEnvironment.looksLikeEnvironment(object) {
@@ -130,7 +243,7 @@ extension AppState {
         if OpenAPIImporter.looksLikeOpenAPI(object) {
             do {
                 let result = try OpenAPIImporter().import(object)
-                return .collection(result.collection, warnings: result.warnings)
+                return .openAPI(result.collection, warnings: result.warnings)
             } catch {
                 return .failure(message(for: error))
             }

@@ -70,6 +70,21 @@ struct MainWindow: View {
         } message: {
             Text("Your changes will be lost if you don't save them.")
         }
+        .confirmationDialog(
+            state.pendingSpecUpdate.map { "Update “\($0.targetName)” from \($0.fileName)?" } ?? "",
+            isPresented: Binding(
+                get: { state.pendingSpecUpdate != nil },
+                set: { if !$0 { state.pendingSpecUpdate = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Update Collection") { state.resolvePendingSpecUpdate(updating: true) }
+            Button("Import as New Collection") { state.resolvePendingSpecUpdate(updating: false) }
+            Button("Cancel", role: .cancel) { state.pendingSpecUpdate = nil }
+        } message: {
+            Text("A collection with this name is already here. Updating adds new operations, "
+                + "applies the spec's changes and keeps your edits; dropped operations move to "
+                + "“\(OpenAPISync.removedFolderName)”. It can be undone.")
+        }
     }
 
     /// Bumped by the ⌘L menu command to move focus into the URL field.

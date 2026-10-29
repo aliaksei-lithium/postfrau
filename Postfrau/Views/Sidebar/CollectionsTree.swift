@@ -164,6 +164,7 @@ struct CollectionRow: View {
         Button("Rename…") { beginRename() }
         Button("Duplicate") { state.duplicateCollection(id: collection.id) }
         Divider()
+        Button("Update from OpenAPI…") { state.runUpdateFromOpenAPIPanel(collectionID: collection.id) }
         Button("Export as Postman Collection…") { state.exportCollection(collection.id) }
         Divider()
         Button("Delete…", role: .destructive) { isConfirmingDelete = true }
@@ -292,7 +293,8 @@ struct RequestRow: View {
     private var isSelected: Bool { prominence == .increased }
 
     var body: some View {
-        HStack(spacing: 6) {
+        // First baseline: the badge sits beside the name, not halfway down the URL under it.
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
             MethodBadge(method: request.method).accessibilityHidden(true)
             if isRenaming {
                 TextField("Name", text: $draftName)
@@ -303,7 +305,19 @@ struct RequestRow: View {
                     .onChange(of: renameFocused) { _, focused in if !focused { commitRename() } }
                     .accessibilityLabel("Rename \(request.name)")
             } else {
-                HighlightedText(request.name, matching: state.sidebarFilter).lineLimit(1)
+                // The URL under the name is what tells forty "Provide …" rows apart. Truncated in
+                // the middle, because the end of a path is its most specific part.
+                let subtitle = URLSubtitle.text(for: request.url)
+                VStack(alignment: .leading, spacing: 1) {
+                    HighlightedText(request.name, matching: state.sidebarFilter).lineLimit(1)
+                    if !subtitle.isEmpty {
+                        HighlightedText(subtitle, matching: state.sidebarFilter)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                }
             }
             // Fills the row, the way `CollectionRow` and `FolderRow` already did. Without it the
             // content is only as wide as the name, so hovering — or right-clicking — the empty

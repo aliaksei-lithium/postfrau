@@ -75,6 +75,8 @@ final class AppState {
     var downloadingDocuments: Set<UUID> = []
     /// What the last import did, shown in a sheet. Nil when there is nothing worth saying.
     var importReport: ImportReport?
+    /// An OpenAPI import that matches an existing collection, waiting for update-or-add.
+    var pendingSpecUpdate: PendingSpecUpdate?
     /// Help ▸ Keyboard Shortcuts, and the About window.
     var isShortcutsPresented = false
     var isAboutPresented = false
@@ -122,6 +124,9 @@ final class AppState {
     @ObservationIgnored var lastKnownHistoryCount = 0
     /// Bumped by ⌘L; the window watches it and moves focus into the URL field.
     private(set) var urlFocusRequests = 0
+    /// Bumped when a tab's request has been selected in the sidebar and should be scrolled to;
+    /// `SidebarReveal` watches it.
+    var sidebarRevealRequests = 0
     /// Set when a menu command wants to close a tab that has unsaved work; the tab bar owns the
     /// dialog, so the command hands the decision over rather than presenting one itself.
     var tabPendingCloseConfirmation: UUID?

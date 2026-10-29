@@ -332,4 +332,20 @@ extension CommandRunner {
         _ = try await load()
         try await save(collection: collection)
     }
+
+    /// Merges a newer version of an OpenAPI document into a collection, as `import --into` does.
+    ///
+    /// - Parameter dryRun: work out and report the merge without saving it.
+    public func updateCollection(
+        at path: String, from incoming: RequestCollection,
+        dropped: OpenAPISync.DroppedPolicy, dryRun: Bool = false
+    ) async throws -> (collection: RequestCollection, report: OpenAPISync.Report) {
+        let target = try await resolve(path)
+        guard case .collection(let existing) = target else {
+            throw CommandError.invalid("“\(path)” is a \(target.kind); --into takes a collection.")
+        }
+        let (merged, report) = OpenAPISync.update(existing, from: incoming, dropped: dropped)
+        if !dryRun { try await save(collection: merged) }
+        return (merged, report)
+    }
 }

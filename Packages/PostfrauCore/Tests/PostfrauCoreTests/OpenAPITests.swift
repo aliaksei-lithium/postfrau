@@ -212,16 +212,32 @@ struct OpenAPITests {
         #expect(!OpenAPIImporter.looksLikeOpenAPI(postman))
     }
 
-    @Test func aYamlDocumentSaysWhatToDoAboutIt() {
+    @Test func aYamlDocumentImportsLikeItsJSONForm() throws {
+        let yaml = try OpenAPIImporter().import(fixture("petstore.openapi.yaml"))
+        let json = try imported()
+        #expect(yaml.collection.name == json.collection.name)
+        #expect(yaml.collection.allRequests().map(\.request.url)
+            == json.collection.allRequests().map(\.request.url))
+        // Compared without row ids, which every import mints afresh.
+        #expect(yaml.collection.allRequests().map { OpenAPISync.canonical($0.request.body) }
+            == json.collection.allRequests().map { OpenAPISync.canonical($0.request.body) })
+    }
+
+    @Test func aBrokenYamlDocumentSaysWhereItBroke() {
         let yaml = Data("""
         openapi: 3.0.0
         info:
-          title: Acme
+          title: "Acme
         paths: {}
         """.utf8)
         #expect(OpenAPIImporter.looksLikeYAML(yaml))
-        #expect(throws: OpenAPIImporter.ImportError.looksLikeYAML) {
-            try OpenAPIImporter().import(yaml)
+        do {
+            _ = try OpenAPIImporter().import(yaml)
+            Issue.record("expected an error")
+        } catch let error as OpenAPIImporter.ImportError {
+            #expect(error.localizedDescription.contains("line 3"))
+        } catch {
+            Issue.record("unexpected \(error)")
         }
     }
 

@@ -41,22 +41,38 @@ above fixes it.
 - History of every send, redacted by default
 - Light, dark or follow-the-system, set per machine — the collections folder stays shared
 - Sync by pointing the data folder at iCloud Drive, Dropbox or a git checkout
-- Import OpenAPI 3.x; import/export Postman v2.1 and cURL, both directions
+- Import OpenAPI 3.x (JSON or YAML) and update a collection from a newer spec; import/export
+  Postman v2.1 and cURL, both directions
 - `postfrau` CLI that does all of the above from a shell, including `find` across every request
 - A loopback API, so an agent in a sandbox that cannot read your files can still list and send
 
 ## Importing an API
 
 ```bash
-postfrau import openapi.json     # OpenAPI 3.x, or a Postman collection/environment
+postfrau import openapi.yaml     # OpenAPI 3.x in JSON or YAML, or a Postman collection/environment
 ```
 
 Or **File ▸ Import…**, or drop the file on the sidebar.
 
 An OpenAPI import produces a collection you can send from: `servers[0]` becomes `{{baseUrl}}`,
 tags become folders, path templates become `{{variables}}`, security becomes the collection's
-auth, and bodies come from the spec's examples — or are synthesised from its schemas. JSON only;
-convert YAML first with `yq -o=json spec.yaml > spec.json`.
+auth, and bodies come from the spec's examples — or are synthesised from its schemas. YAML is read
+by Postfrau's own parser for the subset spec files use (anchors, block scalars and flow style
+included).
+
+### Updating from a newer spec
+
+```bash
+postfrau import openapi.yaml --into "Acme API" --dry-run   # what would change
+postfrau import openapi.yaml --into "Acme API"             # apply it
+```
+
+In the app: right-click the collection ▸ **Update from OpenAPI…**, or import a spec whose title
+matches an existing collection and choose **Update Collection**. Requests are matched by method and
+path; new operations are added beside their siblings, changed ones are updated, and any field you
+edited since the import is kept (the report lists the ones the spec changed too). Operations the
+spec dropped move to a "Removed from spec" folder — or are deleted with `--prune`. One ⌘Z undoes it
+in the app.
 
 ## CLI
 

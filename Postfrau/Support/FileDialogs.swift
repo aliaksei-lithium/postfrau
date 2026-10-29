@@ -99,8 +99,22 @@ extension FileDialogs {
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
         panel.prompt = "Import"
-        panel.message = "Choose a Postman collection, a Postman environment, or a curl command."
+        panel.message = "Choose an OpenAPI spec (JSON or YAML), a Postman collection or "
+            + "environment, or a curl command."
         panel.allowedContentTypes = [.json, .plainText, .shellScript, .data]
+        panel.allowsOtherFileTypes = true
+        return panel.runModal() == .OK ? panel.url : nil
+    }
+
+    /// The file panel for Update from OpenAPI….
+    static func chooseOpenAPISpec() -> URL? {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Update"
+        panel.message = "Choose the newer version of this collection's OpenAPI spec (JSON or YAML)."
+        panel.allowedContentTypes = [.json, .yaml, .plainText, .data]
         panel.allowsOtherFileTypes = true
         return panel.runModal() == .OK ? panel.url : nil
     }

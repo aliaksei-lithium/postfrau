@@ -54,7 +54,9 @@ enum Help {
           history show <id>
 
         \(out.bold("TRANSFER"))
-          import <file>                   OpenAPI 3.x (JSON), or Postman collection/environment
+          import <file>                   OpenAPI 3.x (JSON or YAML), or Postman collection/environment
+          import <spec> --into <collection> [--prune] [--dry-run]
+                                          update a collection from a newer OpenAPI spec
           export <collection|environment> [--out file]
           open <path>                     show it in the app
 
@@ -162,6 +164,28 @@ enum Help {
             postfrau env use <name> | none
 
             A secret's value lives in the Keychain, never in the workspace files.
+            """)
+        case "import":
+            out.print("""
+            postfrau import <file>
+            postfrau import <spec> --into <collection> [--prune] [--dry-run]
+
+            Reads an OpenAPI 3.0/3.1 document — JSON or YAML (.yaml, .yml) — a Postman
+            v2.1 collection, or a Postman environment, and adds it to the workspace.
+
+            --into C          update collection C from a newer version of its OpenAPI
+                              spec instead of adding a new collection. Requests are
+                              matched by method and path; new operations are added,
+                              changed ones updated, and fields you edited since the
+                              last import are kept (and listed when the spec changed
+                              them too)
+            --prune           with --into, delete operations the spec no longer has.
+                              Without it they move to a "Removed from spec" folder
+            --dry-run         with --into, report what would change and save nothing
+
+            Examples:
+              postfrau import deposits.yaml
+              postfrau import deposits.yaml --into "Deposit Accounting Service API" --dry-run
             """)
         case "add", "set":
             out.print("""

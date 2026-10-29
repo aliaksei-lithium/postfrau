@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import PostfrauCore
 
 extension AppState {
@@ -275,6 +276,60 @@ extension RequestTab {
     var isScratchAndUntouched: Bool {
         requestID == nil && !isFromHistory && !isDirty
             && draft.url.isEmpty && response == nil
+    }
+}
+
+extension AppState {
+    /// Shows the selected tab's request in the sidebar: its folders opened, its row selected and
+    /// scrolled to.
+    ///
+    /// Only ever this direction. A sidebar click selects without opening, so selecting the row
+    /// here never changes the tab, and there is no loop to break — but every write is still
+    /// skipped when it would change nothing, so a tab switch that lands on a row already selected
+    /// and visible costs no sidebar update at all.
+    func revealSelectedTabInSidebar() {
+        // The history list selects history entries; leave it alone.
+        guard sidebarSection == .collections else { return }
+        guard let tab = selectedTab, let requestID = tab.requestID else {
+            // A scratch or history tab is not in the tree; nothing there should look current.
+            if let selected = sidebarSelection, workspace.collectionContaining(itemID: selected)?
+                .request(withID: selected) != nil {
+                sidebarSelection = nil
+            }
+            return
+        }
+        guard let collection = workspace.collectionContaining(itemID: requestID),
+              let chain = collection.folderChain(to: requestID)
+        else { return }
+
+        let ancestors = [collection.id] + chain
+        if !ancestors.allSatisfy(expandedIDs.contains) {
+            // Unanimated, like a click on a disclosure triangle (see `expansionBinding`).
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) { expandedIDs.formUnion(ancestors) }
+            markUIStateDirty()
+        }
+        if sidebarSelection != requestID { sidebarSelection = requestID }
+        sidebarRevealRequests &+= 1
+    }
+}
+
+extension AppState {
+    /// The table row the sidebar's selection is on, and how many rows the table should have —
+    /// worked out from the model, because `List` gives the table no selected row for a row it has
+    /// not built yet. Nil when the selection has no visible row.
+    func sidebarSelectionRow() -> (row: Int, total: Int)? {
+        guard sidebarSection == .collections, let selected = sidebarSelection else { return nil }
+        let snapshot = sidebarSnapshot
+        let forced = snapshot.forcedOpenIDs
+        guard var position = SidebarRows.position(
+            of: selected, in: snapshot.collections,
+            isOpen: { forced.contains($0) || self.expandedIDs.contains($0) })
+        else { return nil }
+        // The "showing N of M matches" note is a row of its own after the tree.
+        if snapshot.isTruncated { position.total += 1 }
+        return position
     }
 }
 

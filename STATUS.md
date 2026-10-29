@@ -3,7 +3,7 @@
 **v1 complete.** All twelve phases of `PLAN.md` are ticked; `Scripts/release.sh` produces
 `dist/Postfrau-2.2.dmg`.
 
-**Build:** green — `make test` passes: 562 Core tests (~6 s) plus the app unit tests.
+**Build:** green — `make test` passes: 603 Core tests (~6 s) plus the app unit tests.
 `make live-test` adds the ones that talk to the real network; `make ui-test` the ones that drive
 the window.
 
@@ -94,6 +94,17 @@ entries across five day folders load in 71 ms. A second process and the in-proce
 append 150 entries at once with nothing lost and no torn read. Two app instances sharing one data
 folder both pick up an external change within about three seconds. An imported Postman collection
 sends to httpbin and comes back 200, body and headers intact.
+
+**OpenAPI YAML and updating; sidebar subtitles and reveal** (D66–D69): OpenAPI specs import from
+YAML as well as JSON, through a hand-written subset parser. A newer spec can be merged into an
+imported collection: from the collection menu (Update from OpenAPI…), by importing or dropping a
+spec whose title matches (Update / Import as New), or with `postfrau import spec --into C
+[--prune] [--dry-run]`. Edited fields are kept and listed when the spec changed them too; dropped
+operations move to "Removed from spec". Request rows show the URL path under the name. Selecting a
+tab — or launching with one restored — opens its folders, selects its row and scrolls to it, also
+3 800 rows into the stress collection. The URL field re-measures when its width changes, so a
+wrapped URL is no longer clipped, and it grows to five lines. All checked in the running app,
+light and dark, against a scratch workspace (`--local-root-name`).
 
 ## Next — what v1.1 should start with
 

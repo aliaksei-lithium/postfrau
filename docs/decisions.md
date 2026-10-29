@@ -547,6 +547,8 @@ hundred writes land the kill just as unpredictably and always terminate.
 
 ## D44 — OpenAPI import reads JSON only, and builds sendable requests
 
+*JSON only was superseded by D66: YAML is now read by a hand-written subset parser.*
+
 **What.** `Transfer/OpenAPI.swift` imports OpenAPI 3.0 and 3.1 documents. It is offered by
 File ▸ Import, the sidebar drop target and `postfrau import`, all through the same sniffing that
 already told Postman collections from environments from cURL.
@@ -1267,3 +1269,92 @@ which is how agents call the tool, so "no value for token" reached only people w
 Warnings now always go to stderr (stdout stays valid JSON), and `run`/`send`/`--dry-run` results
 carry a `warnings` entry for each secret their scope uses that has no value — next to the request
 it affected. The end-of-command summary no longer repeats it for those verbs.
+
+## D66 — OpenAPI YAML input, and updating a collection from a newer spec
+
+**YAML.** D44 ruled a YAML parser out as too big to hand-roll honestly. What spec files actually
+use turned out to be bounded, and `yq` as a prerequisite was the most common stumble.
+`Transfer/YAML.swift` reads block mappings and sequences (`- key: value` items included), flow
+`[…]`/`{…}`, plain, single- and double-quoted scalars over several lines, `|`/`>` block scalars
+with chomping and indentation indicators, comments, anchors, aliases and `<<` merges, into the
+same `JSONValue` JSON produces. Scalars resolve by the YAML 1.2 core schema (`yes` is a string),
+except that a number with a leading zero stays a string — in a spec `0042` is an identifier. Only
+the first document is read; tags are skipped; tabs as indentation, unclosed quotes and bad
+indentation fail with the line number. A test parses a hand-written YAML petstore and requires it
+to equal the JSON fixture.
+
+**Identity.** Requests are matched by operation: method plus path template with parameter names
+erased (`GET /deposits/{}`), so renaming `{id}` to `{depositId}` is still the same operation. The
+importer stamps every request with that key in `extras["x-postfrau-openapi"]`, beside a
+fingerprint (FNV-1a over a canonical, id-free encoding) of each field as the spec produced it:
+name, description, path, auth, body, and each param and header row by key. The collection carries
+fingerprints of its description, auth and `baseUrl`. The stamp travels into a Postman export as an
+unknown key; that is harmless and keeps a round-trip mergeable.
+
+**Merge policy** (`OpenAPISync.update`), a three-way merge per field against the stamp:
+
+- A field the user has not changed since the import takes the spec's new value. A field the user
+  changed keeps the user's value; when the spec changed it too, the report lists it ("kept your
+  edits to … (body)").
+- Params and headers merge row by row: a row new in the spec is added even if the user filled in
+  the others; a row the user deleted stays deleted; a row the spec dropped goes only if the user
+  had not touched it; the user's own rows stay, after the spec's. The URL's query is rebuilt from
+  the merged params only when params or path changed.
+- New operations go into the folder where their tag-siblings already are, wherever the user moved
+  or renamed it; failing that a top-level folder named after the tag, created if needed.
+- Dropped operations move to a "Removed from spec" folder by default (nothing typed is lost);
+  `--prune` deletes them. One that comes back in a later spec moves back out. Folders the update
+  emptied are removed; folders the user left empty are not.
+- Requests the user added (no stamp) are never touched, flagged or deleted. Request ids, settings
+  and position are kept, so open tabs and history still point at them.
+- Collection: name and variables other than `baseUrl` are the user's; `baseUrl`, auth and
+  description follow the same three-way rule (description takes the spec's when there is no
+  stamp).
+
+**Collections imported before the stamp** — the user's own case — have no record of what the spec
+said, so a change cannot be told from an edit. They are matched by `{{baseUrl}}/…` URL; the user's
+values are kept, while new operations, new param/header rows and descriptions come across. Prune
+never deletes a request matched this way. The report says so, and the update stamps everything,
+so the next one is a full three-way merge.
+
+**Reaching it.** CLI: `postfrau import spec --into <collection> [--prune] [--dry-run]`, with a
+JSON report. App: the collection menu's Update from OpenAPI…, and File ▸ Import / sidebar drop of
+a spec whose title matches an existing collection, which asks Update Collection / Import as New.
+The merge runs off the main actor and lands as one undoable step; if the collection changed while
+it ran, nothing is applied. The app always flags dropped operations rather than deleting them.
+
+## D67 — Request rows show the URL path under the name
+
+Names alone did not tell rows apart: an imported spec gives a dozen "Provide …" requests that
+truncate at the same place. Each request row now has a second line, caption-sized and secondary,
+with `URLSubtitle.text`: the URL without query and fragment, without a leading `{{variable}}` (the
+base every row shares — `{{baseUrl}}/v2/deposits` reads as `/v2/deposits`), and without the scheme
+of a literal URL. Path variables stay as written (`/deposits/{{depositId}}`). It truncates in the
+middle, since the end of a path is its most specific part, and highlights filter matches like the
+name. The badge aligns to the name's baseline. Rows with an empty URL stay one line.
+
+## D68 — Selecting a tab reveals its request in the sidebar
+
+When the selected tab changes (and at launch, for the restored tab) `revealSelectedTabInSidebar`
+expands the request's collection and folders, unanimated, and sets the sidebar selection; a
+scratch or history tab clears a request selection. It does nothing on the History section, and
+every write is skipped when it would change nothing. There is no feedback loop: a sidebar click
+selects without opening, and opening (double click) only changes the tab to the one already shown.
+
+Scrolling could not be left to `List`. `ScrollViewReader` only reaches built rows, and — found by
+logging the table — `List` does not give the `NSTableView` a selected row at all for a row it has
+not built: with a request 3 800 rows into the stress collection, `selectedRow` stayed -1. So
+`SidebarRows.position` (Core, tested) computes the row index and row count from the snapshot and
+the expansion set; `SidebarReveal` checks the count against the table (a mismatch does nothing),
+selects that row as `PressToSelect` does, and calls `scrollRowToVisible`, on the next run-loop
+turn and again at 0.3 s and 1 s while a long table fills. That is a few table calls per reveal
+whatever the collection size; the expansion itself is the same cost as a click on a triangle.
+
+## D69 — The URL field re-measures when its width changes
+
+The field already grew with wrapped text, but it measured only when the text changed, and its
+`NSTextView` had no autoresizing mask, so its width did not follow the field. A URL measured
+before layout or at another window width kept a stale height and its second line was clipped
+(`?customer_id=[` with the rest cut off). The text view now resizes with its scroll view, and a
+frame-change observer re-measures when the width changes. The cap is five lines, then it scrolls
+with an overlay scroller. Highlighting is untouched.

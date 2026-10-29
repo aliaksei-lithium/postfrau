@@ -128,7 +128,7 @@ struct AppTransferTests {
         #expect(collection.requestCount == 1, "the operation became a request")
     }
 
-    @Test func aYamlSpecSaysHowToConvertIt() async {
+    @Test func aYamlSpecImports() async throws {
         let (state, scratch) = makeState()
         defer { try? FileManager.default.removeItem(at: scratch) }
 
@@ -136,11 +136,47 @@ struct AppTransferTests {
         openapi: 3.0.0
         info:
           title: Acme
-        paths: {}
+        paths:
+          /ping:
+            get:
+              summary: Ping
         """.utf8), named: "spec.yaml")
 
-        #expect(state.workspace.collections.isEmpty)
-        #expect(state.importReport?.detail.contains("yq") == true)
+        let collection = try #require(state.workspace.collections.first)
+        #expect(collection.name == "Acme")
+        #expect(collection.requestCount == 1)
+    }
+
+    @Test func theSameSpecAgainOffersToUpdateTheCollection() async throws {
+        let (state, scratch) = makeState()
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        let v1 = Data("""
+        openapi: 3.0.0
+        info: {title: Acme}
+        paths:
+          /ping: {get: {summary: Ping}}
+        """.utf8)
+        let v2 = Data("""
+        openapi: 3.0.0
+        info: {title: Acme}
+        paths:
+          /ping: {get: {summary: Ping}}
+          /pong: {get: {summary: Pong}}
+        """.utf8)
+
+        await state.importData(v1, named: "v1.yaml")
+        let original = try #require(state.workspace.collections.first)
+        await state.importData(v2, named: "v2.yaml")
+        #expect(state.pendingSpecUpdate?.targetID == original.id)
+
+        state.resolvePendingSpecUpdate(updating: true)
+        // The merge runs off the main actor; wait for it to land.
+        for _ in 0..<100 where state.workspace.collections.first?.requestCount != 2 {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(state.workspace.collections.count == 1)
+        #expect(state.workspace.collections.first?.requestCount == 2)
+        #expect(state.importReport?.detail.contains("1 added") == true)
     }
 
     @Test func saysSoWhenAFileIsNeitherThing() async {

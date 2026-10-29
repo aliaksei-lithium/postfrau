@@ -140,8 +140,9 @@ literal `/` in a name is `\/`. A UUID works anywhere a path does. `set` changes 
 given.
 
 An OpenAPI import is sendable, not a transcription: `servers[0]` → `{{baseUrl}}`, tags → folders,
-path templates → `{{variables}}`, security → collection auth. JSON only; convert YAML with
-`yq -o=json spec.yaml > spec.json`. Read the warnings — they name what could not be modelled.
+path templates → `{{variables}}`, security → collection auth. JSON or YAML. For a newer version
+of the spec, `import spec.yaml --into "<collection>" --dry-run` shows the merge; drop `--dry-run`
+to apply it (edited fields are kept). Read the warnings — they name what could not be modelled.
 
 ## Capture a token, then use it
 

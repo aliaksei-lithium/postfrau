@@ -15,14 +15,41 @@ enum Transfer {
             return .notFound
         }
 
-        guard let root = try? Postfrau.makeDecoder().decode(JSONValue.self, from: data),
-              let object = root.objectValue
-        else {
-            out.error(
-                OpenAPIImporter.looksLikeYAML(data)
-                    ? OpenAPIImporter.ImportError.looksLikeYAML.localizedDescription
-                    : "\(path) is not JSON. For a curl command, use `postfrau add --from-curl`.")
+        let object: [String: JSONValue]
+        do {
+            object = try OpenAPIImporter.document(from: data)
+        } catch let error as OpenAPIImporter.ImportError {
+            out.error(error == .notJSON
+                ? "\(path) is neither JSON nor YAML. For a curl command, use `postfrau add --from-curl`."
+                : error.localizedDescription)
             return .usage
+        }
+
+        // `--into` updates a collection from a newer version of its spec instead of adding one.
+        if let target = arguments.value("--into") {
+            guard OpenAPIImporter.looksLikeOpenAPI(object) else {
+                out.error("--into updates from an OpenAPI document, and \(path) is not one.")
+                return .usage
+            }
+            let incoming = try OpenAPIImporter().import(object)
+            let dryRun = arguments.has("--dry-run")
+            let (collection, report) = try await runner.updateCollection(
+                at: target, from: incoming.collection,
+                dropped: arguments.has("--prune") ? .remove : .flag, dryRun: dryRun)
+            for warning in incoming.warnings + report.warnings { out.warning(warning) }
+            if out.isJSON {
+                out.json(UpdateResult(
+                    kind: "update", name: collection.name, dryRun: dryRun,
+                    added: report.added, updated: report.updated, unchanged: report.unchanged,
+                    keptEdits: report.keptEdits, flagged: report.flagged, removed: report.removed))
+            } else {
+                out.print((dryRun ? "would update " : "updated ") + out.bold(collection.name)
+                    + " " + out.dim("(\(report.summary))"))
+                for line in report.details.dropFirst(report.warnings.count) {
+                    out.print("  " + line)
+                }
+            }
+            return .ok
         }
 
         if PostmanEnvironment.looksLikeEnvironment(object) {
@@ -62,6 +89,19 @@ enum Transfer {
                 + out.dim("(\(result.collection.requestCount) requests)"))
         }
         return .ok
+    }
+
+    /// What `import --into --json` prints.
+    struct UpdateResult: Encodable {
+        var kind: String
+        var name: String
+        var dryRun: Bool
+        var added: [String]
+        var updated: [String]
+        var unchanged: Int
+        var keptEdits: [String]
+        var flagged: [String]
+        var removed: [String]
     }
 
     static func export(

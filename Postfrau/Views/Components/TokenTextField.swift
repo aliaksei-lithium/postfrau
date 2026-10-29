@@ -12,12 +12,16 @@ import PostfrauCore
 /// case, not the exception, and a one-line field turns it into a horizontal scroll where you can
 /// only ever see a fragment of what you are about to send. Past the limit it scrolls vertically,
 /// so a pathological URL cannot eat the window.
+///
+/// The height is re-measured whenever the field's width changes, not only when its text does: a
+/// URL measured before the first layout, or at another window width, otherwise kept that height
+/// and its wrapped lines were cut off below the field.
 struct TokenTextField: NSViewRepresentable {
     @Binding var text: String
     var fontSize: Double
     var placeholder: String
     /// How tall it may grow before it starts scrolling instead.
-    var maximumLines = 4
+    var maximumLines = 5
     /// Reports the height the text needs, so the caller can size the row.
     var onHeightChange: (Double) -> Void = { _ in }
     /// Resolves `{{…}}` so tokens can be coloured and explained. Re-created whenever the
@@ -55,14 +59,23 @@ struct TokenTextField: NSViewRepresentable {
 
         scrollView.documentView = textView
         scrollView.drawsBackground = false
-        scrollView.hasVerticalScroller = false
+        // Shown only past `maximumLines`, when there is something to scroll to.
+        scrollView.hasVerticalScroller = true
+        scrollView.scrollerStyle = .overlay
         scrollView.hasHorizontalScroller = false
         scrollView.verticalScrollElasticity = .none
         scrollView.autohidesScrollers = true
         scrollView.borderType = .noBorder
 
         context.coordinator.apply(self, to: textView, initial: true)
+        // Width changes rewrap the text, so they change the height the field needs.
+        textView.postsFrameChangedNotifications = true
+        context.coordinator.observeWidth(of: textView)
         return scrollView
+    }
+
+    static func dismantleNSView(_ scrollView: NSScrollView, coordinator: Coordinator) {
+        coordinator.stopObserving()
     }
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
@@ -101,6 +114,28 @@ struct TokenTextField: NSViewRepresentable {
 
         init(_ parent: TokenTextField) {
             self.parent = parent
+        }
+
+        private var frameObserver: (any NSObjectProtocol)?
+        private var lastWidth: CGFloat = -1
+
+        func observeWidth(of textView: NSTextView) {
+            frameObserver = NotificationCenter.default.addObserver(
+                forName: NSView.frameDidChangeNotification, object: textView, queue: .main
+            ) { [weak self, weak textView] _ in
+                MainActor.assumeIsolated {
+                    guard let self, let textView else { return }
+                    // Height changes post this too; only a new width can rewrap the text.
+                    guard abs(textView.frame.width - self.lastWidth) > 0.5 else { return }
+                    self.lastWidth = textView.frame.width
+                    self.reportHeight(of: textView)
+                }
+            }
+        }
+
+        func stopObserving() {
+            if let frameObserver { NotificationCenter.default.removeObserver(frameObserver) }
+            frameObserver = nil
         }
 
         func apply(_ config: TokenTextField, to textView: NSTextView, initial: Bool) {
