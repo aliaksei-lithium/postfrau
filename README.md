@@ -114,7 +114,7 @@ Needs macOS 26, Xcode 26 and [XcodeGen](https://github.com/yonaskolb/XcodeGen). 
 make gen      # generate the Xcode project
 make build    # app + CLI
 make run
-make test     # 562 Core tests + app tests
+make test     # 607 Core tests + app tests
 make release  # signed DMG in dist/
 ```
 

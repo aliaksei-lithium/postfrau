@@ -497,10 +497,16 @@ final class AppState {
             await previous?.stop()
             let server = LocalAPIServer(
                 port: wanted.port, token: wanted.token,
-                runner: CommandRunner(
+                dataFolderPath: await store.folder.root.path
+            ) {
+                let runner = CommandRunner(
                     store: store, history: history, executor: executor, secrets: secrets,
-                    source: .agent(name: "api")),
-                dataFolderPath: await store.folder.root.path)
+                    source: .agent(name: "api"))
+                // This is the app's own process, so the Keychain items it reads are its own and
+                // no prompt can block: secrets kept there reach an agent as they reach the window.
+                await runner.setUsesKeychain(true)
+                return runner
+            }
             do {
                 try await server.start()
                 self?.adopt(server)

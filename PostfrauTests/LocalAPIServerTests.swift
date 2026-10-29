@@ -24,10 +24,11 @@ struct LocalAPIServerTests {
             try await store.save(collection: seed)
         }
         let server = LocalAPIServer(
-            port: port, token: token,
-            runner: CommandRunner(
-                store: store, history: HistoryStore(root: root.appending(path: "history"))),
-            dataFolderPath: folder.root.path)
+            port: port, token: token, dataFolderPath: folder.root.path
+        ) {
+            CommandRunner(
+                store: store, history: HistoryStore(root: root.appending(path: "history")))
+        }
         return (server, root)
     }
 

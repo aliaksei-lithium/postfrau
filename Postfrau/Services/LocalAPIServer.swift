@@ -23,17 +23,24 @@ actor LocalAPIServer {
 
     private let port: UInt16
     private let token: String
-    private let runner: CommandRunner
+    /// A fresh runner for every request, so each reads the workspace as it is now — a token
+    /// renewed in the app a moment ago is the one that goes out — and a `--env` one call names
+    /// cannot leak into another running beside it. One shared runner used to load once and keep
+    /// that copy for as long as the app ran.
+    private let makeRunner: @Sendable () async -> CommandRunner
     private let dataFolderPath: String
     private var listener: NWListener?
 
     /// The queue Network hands us callbacks on. Everything they touch is hopped into the actor.
     private let queue = DispatchQueue(label: "com.postfrau.local-api")
 
-    init(port: UInt16, token: String, runner: CommandRunner, dataFolderPath: String) {
+    init(
+        port: UInt16, token: String, dataFolderPath: String,
+        makeRunner: @escaping @Sendable () async -> CommandRunner
+    ) {
         self.port = port
         self.token = token
-        self.runner = runner
+        self.makeRunner = makeRunner
         self.dataFolderPath = dataFolderPath
     }
 
@@ -172,6 +179,7 @@ actor LocalAPIServer {
                 status: 401, json: LocalAPI.Failure(error: "bad or missing bearer token"))
         }
 
+        let runner = await makeRunner()
         do {
             switch (request.method, request.path) {
             case ("GET", "/v1/ping"):
@@ -204,7 +212,7 @@ actor LocalAPIServer {
             case ("POST", "/v1/run"):
                 let body = try JSONDecoder().decode(LocalAPI.RunBody.self, from: request.body)
                 if let environment = body.environment {
-                    _ = try await runner.useEnvironment(named: environment)
+                    try await runner.selectEnvironment(named: environment)
                 }
                 // A dry run must not reach the network. The tool asks for this before anything
                 // pointed at production, so getting it wrong here sends the very request the
@@ -227,7 +235,7 @@ actor LocalAPIServer {
             case ("POST", "/v1/send"):
                 let body = try JSONDecoder().decode(LocalAPI.SendBody.self, from: request.body)
                 if let environment = body.environment {
-                    _ = try await runner.useEnvironment(named: environment)
+                    try await runner.selectEnvironment(named: environment)
                 }
                 var item = RequestItem(
                     name: "", method: HTTPMethod(rawValue: body.method.uppercased()),

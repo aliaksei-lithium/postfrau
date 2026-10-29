@@ -191,6 +191,9 @@ public struct AppSettings: Sendable, Hashable, Codable {
         try c.encodeIfPresent(dataFolderBookmark, forKey: .dataFolderBookmark)
         try c.encodeIfPresent(dataFolderPath, forKey: .dataFolderPath)
         try c.encode(syncSecretsViaICloudKeychain, forKey: .syncSecretsViaICloudKeychain)
+        // Missing until v3.6.1: the choice lived only in memory, and every other reader — the
+        // CLI, the app after a relaunch — saw the default.
+        try c.encode(secretStorage, forKey: .secretStorage)
         try c.encode(appearance, forKey: .appearance)
         try c.encode(editorFontSize, forKey: .editorFontSize)
         try c.encode(responseLayout, forKey: .responseLayout)
@@ -198,6 +201,7 @@ public struct AppSettings: Sendable, Hashable, Codable {
         try c.encode(defaultVerifyTLS, forKey: .defaultVerifyTLS)
         try c.encode(maxHistoryEntries, forKey: .maxHistoryEntries)
         try c.encode(historyRecording, forKey: .historyRecording)
+        try c.encode(historyStoresResponseBodies, forKey: .historyStoresResponseBodies)
         try c.encode(historyBodyCapBytes, forKey: .historyBodyCapBytes)
         try c.encode(allowPreviewJavaScript, forKey: .allowPreviewJavaScript)
         try c.encode(wrapResponseLines, forKey: .wrapResponseLines)

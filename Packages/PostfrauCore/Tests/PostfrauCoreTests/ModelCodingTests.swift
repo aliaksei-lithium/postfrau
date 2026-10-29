@@ -34,6 +34,15 @@ struct ModelCodingTests {
         #expect(decoded.editorFontSize == 13)
     }
 
+    /// Until v3.6.1 neither was written, so the CLI — and the app after a relaunch — never saw
+    /// the choice.
+    @Test func whereSecretsLiveIsSaved() throws {
+        let settings = AppSettings(secretStorage: .keychain, historyStoresResponseBodies: false)
+        let decoded = try roundTrip(settings)
+        #expect(decoded.secretStorage == .keychain)
+        #expect(decoded.historyStoresResponseBodies == false)
+    }
+
     @Test func httpMethodRoundTripsIncludingCustomVerbs() throws {
         for method in HTTPMethod.allCases {
             #expect(try roundTrip(method) == method)

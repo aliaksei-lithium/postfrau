@@ -104,7 +104,7 @@ enum CLI {
 
         // `--env` selects an environment for this invocation only.
         if let environment = parsed.value("--env") {
-            do { _ = try await runner.useEnvironment(named: environment) }
+            do { try await runner.selectEnvironment(named: environment) }
             catch {
                 out.error(CommandRunner.message(for: error))
                 return .notFound
@@ -146,10 +146,13 @@ enum CLI {
         guard verbsThatUseSecrets.contains(verb) else { return }
         let missing = Set(await runner.unavailableSecrets).sorted()
         guard !missing.isEmpty else { return }
+        let inDataFolder = (try? await runner.currentSettings())?.secretStorage == .dataFolder
         out.warning(
             "no value for \(missing.joined(separator: ", ")). "
-                + "Secrets live in the Keychain, which the command line tool does not read by "
-                + "default; pass --keychain to allow it (macOS will ask once), or set "
+                + (inDataFolder
+                    ? "The environment in the data folder has none; set it in the app, or set "
+                    : "Secrets live in the Keychain, which the command line tool does not read by "
+                        + "default; pass --keychain to allow it (macOS will ask once), or set ")
                 + "POSTFRAU_SECRET_\(missing[0].uppercased()).")
     }
 

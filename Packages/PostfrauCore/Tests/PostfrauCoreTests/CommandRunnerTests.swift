@@ -441,6 +441,7 @@ struct CommandRunnerTests {
         stale.variables.append(Variable(key: "token", value: "stale", isSecret: true))
         try encoder.encode(stale).write(to: folder.environmentFile(environment.id))
 
+        try await store.save(settings: AppSettings(secretStorage: .keychain))
         let secrets = SecretsStore(service: "com.postfrau.tests.\(UUID())")
         try await secrets.setValue("fresh", scope: environment.id, key: "token")
         defer { Task { try? await secrets.delete(scope: environment.id, key: "token") } }
@@ -453,6 +454,48 @@ struct CommandRunnerTests {
         let dry = try await runner.dryRun(requestAt: "Acme API/Health")
         #expect(dry.url == "https://fresh.test/health")
         #expect(dry.warnings.isEmpty)
+    }
+
+    /// v3.5.1 regression: with secrets kept in the data folder — the default — the file holds
+    /// the live value, and the CLI threw it away, so `--env` sent an empty token.
+    @Test func aSecretInTheDataFolderIsUsedWhenSecretsLiveThere() async throws {
+        let temp = TempDirectory()
+        let folder = DataFolder(root: temp.url.appending(path: "Data"), needsCoordination: false)
+        try folder.prepare()
+        let store = WorkspaceStore(dataFolder: folder, localRoot: temp.url)
+        try await store.save(collection: makeSampleCollection())
+        try await store.save(settings: AppSettings(secretStorage: .dataFolder))
+        let environment = RequestEnvironment(name: "Prod", variables: [
+            Variable(key: "baseUrl", value: "https://{{token}}.test"),
+            Variable(key: "token", value: "live", isSecret: true),
+        ])
+        let encoder = Postfrau.makeEncoder()
+        encoder.userInfo[.includeSecretValues] = true
+        try encoder.encode(environment).write(to: folder.environmentFile(environment.id))
+
+        let runner = CommandRunner(
+            store: store, history: HistoryStore(root: temp.url.appending(path: "history")))
+        try await runner.selectEnvironment(named: "Prod")
+
+        let dry = try await runner.dryRun(requestAt: "Acme API/Health")
+        #expect(dry.url == "https://live.test/health")
+        #expect(dry.warnings.isEmpty)
+        #expect(await runner.unavailableSecrets.isEmpty)
+    }
+
+    /// `--env` is for one command: it must not switch the environment the window has active.
+    @Test func selectingAnEnvironmentLeavesTheAppsChoiceAlone() async throws {
+        let temp = TempDirectory()
+        let runner = try await makeRunner(at: temp.url)
+        _ = try await runner.addEnvironment(named: "Prod")
+        let before = await runner.store.loadUIState().activeEnvironmentID
+
+        #expect(try await runner.selectEnvironment(named: "Prod") == "Prod")
+        #expect(await runner.store.loadUIState().activeEnvironmentID == before)
+
+        // And it outlasts a re-read, which is what a long `--from-file` batch does between sends.
+        await runner.invalidate()
+        #expect(try await runner.currentWorkspace().activeEnvironment?.name == "Prod")
     }
 
     @Test func runSendsAndRecordsWithAttribution() async throws {

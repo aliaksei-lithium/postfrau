@@ -1358,3 +1358,23 @@ before layout or at another window width kept a stale height and its second line
 (`?customer_id=[` with the rest cut off). The text view now resizes with its scroll view, and a
 frame-change observer re-measures when the width changes. The cap is five lines, then it scrolls
 with an overlay scroller. Highlighting is untouched.
+
+## D70 — The CLI reads a secret where the app does; `--env` is per command
+
+v3.5.1 (D65) made the CLI ignore every secret value in the data folder and read only the Keychain.
+That is right when secrets are kept in the Keychain, but the default is the data folder, where the
+file holds the live value — so with `--env`, every secret went out empty and requests got 403s.
+D65 also missed that `AppSettings.encode` never wrote `secretStorage` (nor
+`historyStoresResponseBodies`): the choice lived only in the running app, and the CLI always saw
+the default. Both are fixed. `CommandRunner.hydrate` now follows `secretStorage`: in data-folder
+mode the file's value is used, and a blank falls back to the Keychain under `--keychain`. In
+Keychain mode the file is ignored, as before. An override (`POSTFRAU_SECRET_<KEY>`) beats both.
+
+The Local API server held one `CommandRunner` that loaded the workspace once and kept it while the
+app ran, so a token renewed in the window never reached an agent. It now builds a runner per
+request, with Keychain access (it is the app's own process, so no prompt can block).
+
+`--env` used to call `useEnvironment`, which also wrote `ui-state.json`: one agent call switched
+the window's environment, and concurrent calls naming different environments raced. It now calls
+`selectEnvironment`, which applies only to that runner and survives re-reads. `env use` still
+switches the app.

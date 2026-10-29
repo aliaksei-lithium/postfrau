@@ -96,7 +96,10 @@ public actor CommandRunner {
         // tabs rather than in the synced workspace — so it has to be read separately, or every
         // `{{variable}}` the environment defines would come back unresolved.
         workspace.activeEnvironmentID = await store.loadUIState().activeEnvironmentID
-        // Secret values live in the Keychain, not in the files just read.
+        // `--env` beats the app's choice, for this process only, and survives a re-read.
+        if let selectedEnvironmentID { workspace.activeEnvironmentID = selectedEnvironmentID }
+        // Secret values may live in the Keychain rather than in the files just read.
+        unavailableSecrets = []
         workspace = await hydrated(workspace)
         isLoaded = true
         return workspace
@@ -118,6 +121,29 @@ public actor CommandRunner {
 
     public func setUsesKeychain(_ enabled: Bool) { usesKeychain = enabled }
 
+    /// The environment `--env` named, kept apart from the app's own choice. Nil means "whatever
+    /// the app has active"; `.some(nil)` means no environment at all.
+    private var selectedEnvironmentID: UUID??
+
+    /// Uses the environment called `name` for this runner only, without switching the app.
+    ///
+    /// `--env` used to go through `useEnvironment`, which also wrote the choice to `ui-state.json`
+    /// — so an agent's one call switched the window's environment, and two calls naming different
+    /// environments raced on the file.
+    @discardableResult
+    public func selectEnvironment(named name: String) async throws -> String {
+        _ = try await load()
+        if name.lowercased() == "none" {
+            selectedEnvironmentID = .some(nil)
+            workspace.activeEnvironmentID = nil
+            return "none"
+        }
+        let environment = try await environment(named: name)
+        selectedEnvironmentID = environment.id
+        workspace.activeEnvironmentID = environment.id
+        return environment.name
+    }
+
     private func hydrated(_ workspace: Workspace) async -> Workspace {
         var copy = workspace
         for index in copy.environments.indices {
@@ -129,20 +155,28 @@ public actor CommandRunner {
         return copy
     }
 
-    /// Fills in secret values from the overrides, and from the Keychain when that was asked for.
+    /// Fills in secret values from wherever the app keeps them, or says it cannot.
     ///
-    /// Whatever the data folder holds for a secret is never used. The app writes a blank there and
-    /// keeps the value in the Keychain, and reads only the Keychain back — so a value in the file
-    /// is one the app has stopped looking at: left by an older build, an import, a hand edit.
-    /// The CLI used to send it whenever it was there, without asking the Keychain even under
-    /// `--keychain` and without a warning, so a token renewed in the app kept going out stale.
-    /// Now the CLI reads a secret exactly where the app does, or says it cannot.
+    /// An override always wins. After that the CLI reads a secret exactly where the app does,
+    /// which `AppSettings.secretStorage` decides:
+    ///
+    /// - **Data folder** (the default): the value in the file is the live one. A blank there is a
+    ///   secret from before the switch, still in the Keychain, and is read from it under
+    ///   `--keychain` — the same fallback the app makes at launch.
+    /// - **Keychain**: the file holds a blank, and any value in it is one the app has stopped
+    ///   looking at — left by an older build, an import, a hand edit. It is never sent: v3.5
+    ///   did, and a token renewed in the app kept going out stale.
+    ///
+    /// v3.5.1 applied the Keychain rule in both modes, so in the default mode every secret went
+    /// out empty.
     private func hydrate(_ variables: [Variable], scope: UUID) async -> [Variable] {
         var filled = variables
         var missing: [String] = []
         for index in filled.indices where filled[index].isSecret && !filled[index].key.isEmpty {
             if let supplied = secretOverrides[filled[index].key] {
                 filled[index].value = supplied
+            } else if settings.secretStorage == .dataFolder, !filled[index].value.isEmpty {
+                continue
             } else {
                 filled[index].value = ""
                 missing.append(filled[index].key)
@@ -171,7 +205,13 @@ public actor CommandRunner {
         guard !missing.isEmpty else { return [] }
         let used = Set(scope.effectiveValues().keys)
         return missing.intersection(used).sorted().map { name in
-            "no value for secret “\(name)”: secrets are kept in the Keychain"
+            if settings.secretStorage == .dataFolder {
+                return "no value for secret “\(name)”: the data folder has none"
+                    + (usesKeychain
+                        ? ", and neither has the Keychain on this Mac."
+                        : ". Set it in the app, or set POSTFRAU_SECRET_\(name.uppercased()).")
+            }
+            return "no value for secret “\(name)”: secrets are kept in the Keychain"
                 + (usesKeychain
                     ? ", which has none for it on this Mac."
                     : ". Pass --keychain to read it, or set POSTFRAU_SECRET_\(name.uppercased()).")
@@ -195,9 +235,12 @@ public actor CommandRunner {
 
     func save(environment: RequestEnvironment, previous: [Variable]) async throws {
         var toStore = environment
-        // Same rule as the app: a secret's value never reaches the file. Writing one needs the
-        // Keychain, which this process only touches when told to — see `usesKeychain`.
-        if usesKeychain {
+        // Same rule as the app: in data-folder mode the value is written with the file; otherwise
+        // it never reaches the file, and writing one needs the Keychain, which this process only
+        // touches when told to — see `usesKeychain`.
+        if settings.secretStorage == .dataFolder {
+            // The store writes the values itself; see `setWritesSecretValues` in `load()`.
+        } else if usesKeychain {
             try await secrets.persist(
                 environment.variables, previous: previous, scope: environment.id)
         } else if environment.variables.contains(where: { $0.isSecret && !$0.value.isEmpty }) {

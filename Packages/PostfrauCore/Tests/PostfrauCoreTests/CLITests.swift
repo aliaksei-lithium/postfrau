@@ -72,6 +72,12 @@ struct CLITests {
         }
     }
 
+    /// Settings ▸ Data ▸ Keep secrets in: Keychain. The default is the data folder.
+    private func keepingSecretsInTheKeychain(_ root: URL) throws {
+        try Postfrau.makeEncoder().encode(AppSettings(secretStorage: .keychain))
+            .write(to: root.appending(path: "local/settings.json"))
+    }
+
     // MARK: - Basics
 
     @Test func versionSaysWhichWorkspaceItIsUsing() throws {
@@ -307,6 +313,7 @@ struct CLITests {
     @Test func aSecretIsNotStoredWithoutPermissionToUseTheKeychain() throws {
         let temp = TempDirectory()
         try prepared(temp.url)
+        try keepingSecretsInTheKeychain(temp.url)
         try run(["env", "add", "Staging"], in: temp.url)
 
         // Never hangs waiting for a keychain dialog nobody can answer: it says no instead.
@@ -356,6 +363,7 @@ struct CLITests {
             "add", "Acme", "--url", "https://api.test/{{token}}", "--name", "Thing",
         ], in: temp.url)
         try run(["env", "add", "Prod"], in: temp.url)
+        try keepingSecretsInTheKeychain(temp.url)
 
         // As an older build or a hand edit leaves it: the value written into the file.
         let directory = temp.url.appending(path: "data/environments")
@@ -386,6 +394,26 @@ struct CLITests {
         let get = try run(["--env", "Prod", "get", "Acme/Thing", "--json"], in: temp.url)
         #expect(!get.stdout.contains("stale-on-disk"))
         #expect(get.stderr.contains("no value for token"), "warnings reach stderr under --json")
+    }
+
+    /// The v3.6 report: a token set in the app, `--env` named, and an empty token went out.
+    /// Secrets kept in the data folder — the default — are in the file, and that is the value.
+    @Test func aSecretInTheDataFolderIsSentWithEnv() throws {
+        let temp = TempDirectory()
+        try prepared(temp.url)
+        try run(["add", "Acme", "--collection"], in: temp.url)
+        try run([
+            "add", "Acme", "--url", "https://api.test/{{token}}", "--name", "Thing",
+        ], in: temp.url)
+        try run(["env", "add", "Prod"], in: temp.url)
+        try run(["env", "set", "Prod", "token=from-the-app", "--secret"], in: temp.url)
+
+        let dry = try run(
+            ["--env", "Prod", "run", "Acme/Thing", "--dry-run", "--json"], in: temp.url)
+        #expect(dry.code == 0, "\(dry.stderr)")
+        let result = try JSONDecoder().decode(DryRunResult.self, from: Data(dry.stdout.utf8))
+        #expect(result.url == "https://api.test/from-the-app")
+        #expect(result.warnings.isEmpty)
     }
 
     /// Every flag that carries a value has to be declared as one.
