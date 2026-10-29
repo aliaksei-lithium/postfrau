@@ -76,6 +76,7 @@ struct SidebarReveal: View {
                     table.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
                 }
                 table.scrollRowToVisible(row)
+                SidebarRelayout.relayoutVisibleRows(of: table)
             }
 
             private static func firstTable(in view: NSView) -> NSTableView? {

@@ -22,6 +22,23 @@ struct SidebarRelayout: View {
             .accessibilityHidden(true)
     }
 
+    /// Re-measures the rows on screen and redraws them. Also called by `SidebarReveal` after it
+    /// scrolls: a reveal opens folders and scrolls in the same moment, and the rows it scrolls to
+    /// were laid out before the folders opened. Since request rows carry a URL line they are
+    /// taller than folder and collection rows, so a stale frame is a visible one — a collection's
+    /// name drawn over the selected request.
+    static func relayoutVisibleRows(of table: NSTableView) {
+        let visible = table.rows(in: table.visibleRect)
+        guard visible.length > 0 else { return }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0
+            table.noteHeightOfRows(withIndexesChanged: IndexSet(
+                integersIn: visible.location..<(visible.location + visible.length)))
+        }
+        table.needsLayout = true
+        table.needsDisplay = true
+    }
+
     private struct Nudge: NSViewRepresentable {
         var expanded: Set<UUID>
         var filter: String
@@ -62,15 +79,7 @@ struct SidebarRelayout: View {
                     table = view.window?.contentView.flatMap(Self.firstTable(in:))
                 }
                 guard let table else { return }
-                let visible = table.rows(in: table.visibleRect)
-                guard visible.length > 0 else { return }
-                NSAnimationContext.runAnimationGroup { context in
-                    context.duration = 0
-                    table.noteHeightOfRows(withIndexesChanged: IndexSet(
-                        integersIn: visible.location..<(visible.location + visible.length)))
-                }
-                table.needsLayout = true
-                table.needsDisplay = true
+                SidebarRelayout.relayoutVisibleRows(of: table)
             }
 
             private static func firstTable(in view: NSView) -> NSTableView? {
