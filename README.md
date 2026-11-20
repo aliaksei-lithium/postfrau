@@ -19,7 +19,8 @@
 
 ## Install
 
-Download the DMG from [Releases](https://github.com/aliaksei-lithium/postfrau/releases) and drag
+Download **[Postfrau 3.7](https://github.com/aliaksei-lithium/postfrau/releases/download/v3.7/Postfrau-3.7.dmg)**
+(or any version from [Releases](https://github.com/aliaksei-lithium/postfrau/releases)) and drag
 Postfrau to Applications. The app is not notarized, so the first time either right-click it and
 choose **Open**, or run:
 
