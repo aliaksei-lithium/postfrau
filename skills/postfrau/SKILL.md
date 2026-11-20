@@ -44,6 +44,11 @@ Quote values in single quotes. `!`, `$` and `&` are shell metacharacters.
 - `--as <your own name>` on everything that sends — `--as cursor`, `--as claude`, `--as copilot`.
   Or set `POSTFRAU_AGENT` once. The user reads it in the history to tell tools apart.
 - `--json` for anything you parse. Human output is aligned text. `run --all --json` is NDJSON.
+  Only the JSON goes to stdout; warnings and errors go to stderr. For a large response, write
+  stdout to a file and read the file, rather than piping both streams into a parser.
+- `--env NAME` on each command. Not `env use`: that switches the environment in the user's
+  window too.
+- Flags work before or after the command name: `postfrau --env E run …` = `postfrau run … --env E`.
 - `--dry-run` before anything that writes, and before anything pointed at production.
 - `rm` needs `--yes`. Secrets print as `•••` unless asked for with `--reveal`.
 - A flag the command does not take exits 1 and sends nothing — so does `--param` without `=`.
@@ -80,6 +85,17 @@ postfrau run '<path>' --auth bearer:abc                # replace the auth (none,
 `--param name=…` replaces every saved row called `name` — enabled or disabled — so repeat it for
 an array. An OpenAPI import keeps optional params and array examples as *disabled* rows: they
 are not sent until you pass them. A dry run lists them in `warnings`.
+
+## Authenticated requests
+
+| Goal | Do | Avoid |
+|---|---|---|
+| Call an endpoint that needs the collection's token | `run '<path>' --env E` — it carries the collection's or folder's auth | `send` with a URL copied out of `get`: it has no auth unless you pass `--auth` |
+| A one-off URL with the environment's token | `send GET '<url>' --env E --auth bearer` (uses E's `{{token}}`) | `--auth bearer:<pasted token>` |
+| The saved request with another body | `run '<path>' --env E --body @payload.json` | `set --body`, or editing collection files |
+| Check auth before sending | `--dry-run`: an `Authorization` header is listed (value `•••`) | Retrying a 401/403 unchanged |
+
+`--auth` whose variables have no value in the environment exits 1 and sends nothing.
 
 `--field` values are JSON when they parse (`42`, `true`, `'id="42"'` for a string of digits),
 text otherwise, and `{{variables}}` resolve first. To run the same request once per id:
@@ -182,26 +198,45 @@ after it. No match exits 2; the request itself still succeeded.
 
 ## In a sandbox that cannot read the files
 
-If the collections folder or `~/Library/Containers` is unreadable, `--data-dir` will not help —
-the tool says so and points here. Ask the running app instead:
+An agent's sandbox usually cannot read the app's data folder, so commands exit 5. `--data-dir`
+will not help, and copying the folder or widening the sandbox is not the fix. Ask the running app
+instead, through the CLI:
 
 ```bash
-export POSTFRAU_API_TOKEN=<Settings ▸ Advanced ▸ Local API>
-export POSTFRAU_API_URL=http://127.0.0.1:7717     # only if the port was changed
+POSTFRAU_AGENT=claude postfrau version        # must say "via the app at http://127.0.0.1:7717"
+POSTFRAU_AGENT=claude postfrau ls
 ```
 
+That needs `POSTFRAU_API_TOKEN` (Settings ▸ Advanced ▸ Local API) **exported** in the shell
+postfrau runs in. An agent's shell is usually a non-interactive zsh, which reads `~/.zshenv` and
+not `~/.zshrc`, so the user puts this line in `~/.zshenv`:
+
+```bash
+export POSTFRAU_API_TOKEN=<the token from that pane>
+```
+
+- Call `postfrau` directly. No `zsh -lc`, `bash -c` or `env` wrapper, and never `curl` the port:
+  the CLI is the client.
+- Do not read `~/.zshenv`, print the token, or put it on a command line.
+- If `version` does not mention the app and exits 5, the token is not exported: say so and stop.
+  A shell already running does not re-read `~/.zshenv`; only a new one sees the change.
+- `POSTFRAU_API_URL` overrides the address, only if the port was changed.
+
 `ls`, `find`, `get`, `run`, `send`, `version` then work identically — same output, same exit
-codes, sends still recorded. `run --all` and `send --save-to` need the folder and exit 1; an app
-older than the tool exits 1 rather than ignore `--param` or `--auth`. `add`, `set`, `mv`, `rm`, `import`, `export`, `history` and `env`
-need a real folder and will say so.
+codes, sends still recorded. `env`, `set`, `add`, `mv`, `rm`, `import`, `export` and `history`
+need the folder and say "Remotely you can: …" — expected; use `--env`, `--body`, `--param` on
+`run` instead. `run --all` and `send --save-to` exit 1 for the same reason. An app older than the
+tool exits 1 rather than ignore `--param` or `--auth`.
 
 Works only while Postfrau is running. If it cannot reach the app, say so and ask the user to
-check that switch — do not copy their files somewhere readable.
+check that switch.
 
 ## When something is wrong
 
 - `postfrau version` — which data folder, and where it came from; or which app, with a token set.
 - Exit 5 — folder unavailable. Unreadable rather than wrong? Use the local API above.
+- 401 or 403 — run it again with `--dry-run` and look for `Authorization`. None: the request has
+  no auth of its own; `run` the saved one with `--env`, or pass `--auth bearer`.
 - Secrets (tokens) are read only from the Keychain, where the app keeps them — never from the
   workspace files. Without `--keychain` a secret has no value, and `warnings` in the `--json`
   result says `no value for secret "token"`. Check `warnings` before trusting a 401: add

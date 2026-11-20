@@ -287,6 +287,11 @@ enum RemoteAPI {
         return try await send(request, endpoint)
     }
 
+    /// Ephemeral: nothing here is worth caching, and the shared session's on-disk cache lives
+    /// under `~/Library/Caches`, which an agent's sandbox usually cannot write — CFNetwork then
+    /// prints `Cache.db … result=8` to stderr on every call, which reads as a failure.
+    private static let session = URLSession(configuration: .ephemeral)
+
     private static func send<T: Decodable>(
         _ request: URLRequest, _ endpoint: Endpoint
     ) async throws -> T {
@@ -299,7 +304,7 @@ enum RemoteAPI {
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await URLSession.shared.data(for: request)
+            (data, response) = try await session.data(for: request)
         } catch {
             throw Failure(
                 message: "cannot reach Postfrau at \(endpoint.url.absoluteString) — is the app "
