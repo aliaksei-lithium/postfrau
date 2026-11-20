@@ -309,14 +309,17 @@ public actor CommandRunner {
     }
 
     /// The auth a request will send after the inherit chain is walked.
-    public func effectiveAuth(forRequestWithID id: UUID) -> Auth {
+    ///
+    /// - Parameter requestAuth: the request's own auth to start from instead of the saved one —
+    ///   `run --auth inherit` uses the folder's or collection's even when the request has its own.
+    public func effectiveAuth(forRequestWithID id: UUID, requestAuth: Auth? = nil) -> Auth {
         guard let collection = workspace.collections.first(where: { $0.request(withID: id) != nil }),
               let request = collection.request(withID: id)
-        else { return Auth.none }
+        else { return requestAuth ?? Auth.none }
         let chain = (collection.folderChain(to: id) ?? [])
             .compactMap { collection.folder(withID: $0) }
         return AuthResolver.effective(
-            requestAuth: request.auth, folderChain: chain, collection: collection).auth
+            requestAuth: requestAuth ?? request.auth, folderChain: chain, collection: collection).auth
     }
 
     // MARK: - Mutating the in-memory workspace

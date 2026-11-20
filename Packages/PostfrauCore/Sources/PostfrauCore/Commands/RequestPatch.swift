@@ -13,6 +13,24 @@ public struct RequestPatch: Sendable, Hashable, Codable {
     public var fields: [Field]
     /// Headers to add, or to replace when one with the same name (any case) is already there.
     public var headers: [HeaderField]
+    /// Query parameters for this send. Every saved row with one of these names — enabled or
+    /// disabled — is replaced by the rows given here, in order, so repeating a name sends it
+    /// repeatedly: `--param id=a --param id=b` is `?id=a&id=b`. A row with an empty value only
+    /// removes: `--param page=` sends no `page` at all.
+    public var params: [QueryParam]
+    /// Replaces the request's own auth for this send. `.inherit` uses the folder's or the
+    /// collection's even when the request has auth of its own.
+    public var auth: Auth?
+
+    public struct QueryParam: Sendable, Hashable, Codable {
+        public var name: String
+        public var value: String
+
+        public init(name: String, value: String) {
+            self.name = name
+            self.value = value
+        }
+    }
 
     public struct Field: Sendable, Hashable, Codable {
         /// `partner_bank_id`, `data.items[0].id` — the `--capture` path syntax, `$` optional.
@@ -28,13 +46,42 @@ public struct RequestPatch: Sendable, Hashable, Codable {
         }
     }
 
-    public init(body: String? = nil, fields: [Field] = [], headers: [HeaderField] = []) {
+    public init(
+        body: String? = nil, fields: [Field] = [], headers: [HeaderField] = [],
+        params: [QueryParam] = [], auth: Auth? = nil
+    ) {
         self.body = body
         self.fields = fields
         self.headers = headers
+        self.params = params
+        self.auth = auth
     }
 
-    public var isEmpty: Bool { body == nil && fields.isEmpty && headers.isEmpty }
+    /// Every field this build reads, for `LocalAPI.decodeStrictly`.
+    public static let fields: Set<String> = ["body", "fields", "headers", "params", "auth"]
+
+    public var isEmpty: Bool {
+        body == nil && fields.isEmpty && headers.isEmpty && params.isEmpty && auth == nil
+    }
+
+    /// Whether this patch uses anything beyond the v3.5 contract (`body`, `fields`, `headers`),
+    /// which an older app would decode and then silently drop.
+    public var needsParamsCapability: Bool { !params.isEmpty || auth != nil }
+
+    /// What `--param` did, for a dry run to say: `--param deposit_id ×3, --param page`.
+    public var paramsOrigin: String? {
+        guard !params.isEmpty else { return nil }
+        var order: [String] = []
+        var counts: [String: Int] = [:]
+        for param in params {
+            if counts[param.name] == nil { order.append(param.name) }
+            counts[param.name, default: 0] += 1
+        }
+        return order.map { name in
+            let count = counts[name] ?? 1
+            return "--param \(name)" + (count > 1 ? " ×\(count)" : "")
+        }.joined(separator: ", ")
+    }
 
     /// Whether the body that goes out differs from the saved one.
     public var changesBody: Bool { body != nil || !fields.isEmpty }
@@ -55,6 +102,8 @@ public struct RequestPatch: Sendable, Hashable, Codable {
         body = try container.decodeIfPresent(String.self, forKey: .body)
         fields = try container.decodeIfPresent([Field].self, forKey: .fields) ?? []
         headers = try container.decodeIfPresent([HeaderField].self, forKey: .headers) ?? []
+        params = try container.decodeIfPresent([QueryParam].self, forKey: .params) ?? []
+        auth = try container.decodeIfPresent(Auth.self, forKey: .auth)
     }
 
     // MARK: - Applying
@@ -107,6 +156,28 @@ public struct RequestPatch: Sendable, Hashable, Codable {
             request.headers.removeAll { $0.key.caseInsensitiveCompare(header.name) == .orderedSame }
             request.headers.append(KeyValue(key: header.name, value: header.value))
         }
+
+        if !params.isEmpty { request = Self.applying(params, to: request) }
+        if let auth { request.auth = auth }
+        return request
+    }
+
+    /// The request with `params` in its table, and the table owning the whole query.
+    ///
+    /// The builder sends the URL text's own query when the table has no enabled rows, so a
+    /// request saved as `…?page=1` with an empty table would keep `page` after `--param page=`
+    /// removed it. Moving that query into the table first, then dropping it from the text, leaves
+    /// one place the query comes from.
+    public static func applying(_ params: [QueryParam], to request: RequestItem) -> RequestItem {
+        var request = request
+        if request.params.active.isEmpty {
+            request.params += URLQuery.parse(request.url).params
+        }
+        request.url = URLQuery.stripQuery(from: request.url)
+        let names = Set(params.map(\.name))
+        request.params.removeAll { names.contains($0.key) }
+        request.params += params.filter { !$0.value.isEmpty }
+            .map { KeyValue(key: $0.name, value: $0.value) }
         return request
     }
 

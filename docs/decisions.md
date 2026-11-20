@@ -1378,3 +1378,58 @@ request, with Keychain access (it is the app's own process, so no prompt can blo
 the window's environment, and concurrent calls naming different environments raced. It now calls
 `selectEnvironment`, which applies only to that runner and survives re-reads. `env use` still
 switches the app.
+
+## D71 — Nothing the command line is given is dropped
+
+From a client running daily interest rollbacks through `postfrau run`. Six things, one theme: the
+tool accepted input, did less than it was asked, and exited 0.
+
+**Unknown flags exit 1.** `Arguments` already had `unknownFlags`; nothing called it. `Flags.swift`
+now lists what each verb reads, and `CLI.run` refuses anything else before a workspace is opened
+or a socket dialled — so the same mistake is 1 over the Local API too, not the 5 an unreachable
+app would give. `k=v` flags without `=` (which `pairs` skipped) are refused, as are an `--auth` or
+`--record` value the tool cannot parse (both used to be ignored). Over the Local API, flags that
+cannot be forwarded (`run --all`, `send --save-to`, `--data-dir`) are refused with the reason.
+`--keychain` is accepted: the app reads its own Keychain anyway.
+
+The app now refuses a field it does not know (`LocalAPI.decodeStrictly`, 400) instead of
+`JSONDecoder` dropping it, and reports an exit code with each failure, so a missing path is 2 and a
+bad value 1 through the app as well. An app that predates this cannot be fixed from here; the tool
+asks `ping` for the new `request-params` capability before sending `--param`, `--auth`, `--secret`,
+`--as` or `--record`, and refuses rather than let them be ignored. `POSTFRAU_AGENT` is the one
+exception — an agent's shell sets it for every command, so it is sent only to an app that reads it.
+
+**`run --param`** goes through `RequestPatch.params`, like `--body` (D64). A name replaces every
+saved row of that name, enabled or disabled; repeating it repeats the parameter; an empty value
+removes it; `name=@file` reads one value per line, on the tool's side of any socket. The URL text's
+own query is moved into the table first, because the builder sends that text when the table has no
+enabled rows and it would otherwise come back. `send --param` uses the same function, which also
+fixes `send 'https://x?a=1' --param b=2` losing `a`.
+
+**OpenAPI arrays.** A query parameter with an array schema used to become one row whose value was
+the example encoded as JSON (`["OMA_1","OMA_2"]`), in the URL if required. The default
+serialisation (`style: form, explode: true`) is the key repeated per value, so it now imports as
+one row per example value; `explode: false` joins with `,`, `|` or a space by style. The rows are
+disabled even when the parameter is required: they hold the spec's example ids, which should not
+reach a real server by default, and disabled rows stay out of the URL text. The description says
+it is an array and whether it is required. `OpenAPISync` merges rows of one key as a group, and a
+lone row hashes as before, so existing collections' fingerprints still match.
+
+**Dry runs list params.** `DryRunResult.params` is the query read back from the final URL (so an
+API key in the query shows too), with `paramsOrigin` naming `--param` like `bodyOrigin` names
+`--body`. Two warnings: saved rows that are disabled and not overridden (dry run only — on every
+real send it would be noise, since an OpenAPI import disables every optional parameter), and keys
+in the saved URL's query that the table drops (every send; nothing else shows it).
+
+**`--auth bearer`** with no value means `bearer:{{token}}`, the variable the OpenAPI importer's
+bearer auth uses, so `send --env 'BIPS Production DEU' --auth bearer` carries the token a saved
+request in that collection would. `--auth` now also works on `run`, through the patch; `inherit`
+there takes the folder's or collection's auth even when the request has its own. An `--auth`
+whose variables do not resolve is refused, because the builder drops an empty bearer and the
+request would go out with no Authorization header at all.
+
+**The URL the server sees.** `BuiltRequest.resolvedURL` — what history, `run` and `--dry-run` show —
+no longer includes a `#fragment`, which `URLSession` never sends, and the builder warns when one is
+there, naming the path the server will get. The history entry that ended in
+`#/v2/materialization/rollback-monthly-interest` was a Swagger UI link: the server received the UI
+page's path, not that endpoint. Entries already recorded keep what they recorded.

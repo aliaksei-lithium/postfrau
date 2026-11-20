@@ -85,13 +85,19 @@ postfrau history --last 20
 ```
 
 `run` can change a saved request for one send, without saving anything — check it first with
-`--dry-run`, which prints the body, its size, and whether it is as saved or from `--body`:
+`--dry-run`, which prints the URL the server will see, each query param, the body and its size,
+and where each came from:
 
 ```bash
 postfrau run 'Payments/Create' --body @payload.json --dry-run   # replace the body; {{vars}} resolve
 postfrau run 'Payments/Create' --field partner_bank_id=42        # set one JSON field
 postfrau run 'Payments/Create' -H 'X-Request-ID: abc'            # add or replace a header
+postfrau run 'Interest/Rollback' --param deposit_id=OMA_1 --param deposit_id=OMA_2
+postfrau run 'Interest/Rollback' --param deposit_id=@ids.txt     # one value per line
+postfrau send GET 'https://api.example.com/v2/x' --env Prod --auth bearer   # Prod's {{token}}
 ```
+
+A flag a command does not take exits 1 and sends nothing — locally and through the Local API.
 
 And send the same request once per line of a file — one NDJSON line per send with `--json`,
 each carrying its input and its own correlation id:

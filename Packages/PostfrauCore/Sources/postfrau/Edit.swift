@@ -49,7 +49,7 @@ enum Edit {
 
         // An explicit name always wins over one derived from the URL or the curl command.
         if let name = arguments.value("--name") { request.name = name }
-        apply(arguments, to: &request)
+        try apply(arguments, to: &request)
 
         let added = try await runner.addRequest(request, toFolderAt: target)
         for warning in warnings { out.warning(warning) }
@@ -88,15 +88,7 @@ enum Edit {
         edit.params = arguments.pairs("--param").map { key, value in
             (key, value.isEmpty ? nil : value)
         }
-        if let auth = arguments.value("--auth") {
-            guard let parsed = parseAuth(auth) else {
-                out.error(
-                    "--auth must be none, inherit, bearer:TOKEN, basic:USER:PASS "
-                        + "or apikey:KEY:VALUE[:query].")
-                return .usage
-            }
-            edit.auth = parsed
-        }
+        if let auth = try auth(arguments) { edit.auth = auth }
         if let body = try readBody(arguments) { edit.body = body }
 
         let updated = try await runner.update(requestAt: path, with: edit)
@@ -155,29 +147,79 @@ enum Edit {
     // MARK: - Shared
 
     /// Applies the request-shaping flags that `add` and `send` both accept.
-    static func apply(_ arguments: Arguments, to request: inout RequestItem) {
+    ///
+    /// Throws for a value it cannot use — an `--auth` it does not understand, a `--param` file it
+    /// cannot read — rather than leaving it out and carrying on.
+    static func apply(_ arguments: Arguments, to request: inout RequestItem) throws {
         if let method = arguments.value("--method", "-X") {
             request.method = HTTPMethod(rawValue: method.uppercased())
         }
         for (key, value) in arguments.colonPairs("--header", "-H") {
             request.headers.append(KeyValue(key: key, value: value))
         }
-        for (key, value) in arguments.pairs("--param") {
-            request.params.append(KeyValue(key: key, value: value))
-        }
-        if !request.params.isEmpty {
+        let params = try queryParams(arguments)
+        if !params.isEmpty {
+            // The URL's own query joins the table first, so `send 'https://x?a=1' --param b=2`
+            // sends both rather than only b.
+            request = RequestPatch.applying(params, to: request)
             request.url = URLQuery.compose(
                 base: request.url,
                 params: KeyValueRows.stripped(request.params),
                 encode: request.settings.encodeURL)
         }
-        if let auth = arguments.value("--auth"), let parsed = parseAuth(auth) {
-            request.auth = parsed
-        }
-        if let body = (try? readBody(arguments)) ?? nil { request.body = body }
+        if let auth = try auth(arguments) { request.auth = auth }
+        if let body = try readBody(arguments) { request.body = body }
         if arguments.has("--insecure", "-k") { request.settings.verifyTLS = false }
         if arguments.has("--no-redirects") { request.settings.followRedirects = false }
     }
+
+    /// `--param name=value`, repeatable, in order. A name given twice is sent twice.
+    ///
+    /// `name=@ids.txt` reads one value per line from the file — blank lines and `#` comments
+    /// skipped — so a list of 40 ids is one flag rather than forty. Read here, on this side of any
+    /// socket: the Local API gets the values, not a path it cannot open.
+    static func queryParams(_ arguments: Arguments) throws -> [RequestPatch.QueryParam] {
+        try arguments.pairs("--param").flatMap { name, value -> [RequestPatch.QueryParam] in
+            guard value.hasPrefix("@") else { return [.init(name: name, value: value)] }
+            let path = String(value.dropFirst())
+            let text: String
+            do {
+                text = path == "-"
+                    ? String(decoding: FileHandle.standardInput.readDataToEndOfFile(), as: UTF8.self)
+                    : try String(contentsOf: URL(filePath: path), encoding: .utf8)
+            } catch {
+                throw CommandRunner.CommandError.invalid(
+                    "--param \(name)=@\(path): cannot read \(path): "
+                        + CommandRunner.message(for: error))
+            }
+            let values = text.split(whereSeparator: \.isNewline)
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty && !$0.hasPrefix("#") }
+            guard !values.isEmpty else {
+                throw CommandRunner.CommandError.invalid(
+                    "--param \(name)=@\(path): \(path) has no values in it.")
+            }
+            return values.map { .init(name: name, value: $0) }
+        }
+    }
+
+    /// `--auth`, parsed, or nil when it was not given. An `--auth` that does not parse is an error.
+    static func auth(_ arguments: Arguments) throws -> Auth? {
+        guard let text = arguments.value("--auth") else {
+            if arguments.has("--auth") {
+                throw CommandRunner.CommandError.invalid("--auth needs a value. " + authSyntax)
+            }
+            return nil
+        }
+        guard let parsed = parseAuth(text) else {
+            throw CommandRunner.CommandError.invalid("--auth “\(text)” is not one Postfrau knows. " + authSyntax)
+        }
+        return parsed
+    }
+
+    static let authSyntax =
+        "It takes none, inherit, bearer (the environment's {{token}}), bearer:TOKEN, "
+        + "basic:USER:PASS or apikey:KEY:VALUE[:query]."
 
     /// `-d text`, `-d @file`, `-d -` (stdin).
     static func readBody(_ arguments: Arguments) throws -> RequestBody? {
@@ -205,16 +247,23 @@ enum Edit {
         return raw
     }
 
-    /// `bearer:TOKEN`, `basic:USER:PASS`, `apikey:KEY:VALUE[:query]`, `none`, `inherit`.
+    /// The variable bare `--auth bearer` reads.
+    static let bearerVariable = "token"
+
+    /// `bearer`, `bearer:TOKEN`, `basic:USER:PASS`, `apikey:KEY:VALUE[:query]`, `none`, `inherit`.
     static func parseAuth(_ text: String) -> Auth? {
         let parts = text.split(separator: ":", omittingEmptySubsequences: false).map(String.init)
         switch parts.first?.lowercased() {
         case "none": return Auth.none
         case "inherit": return .inherit
         case "bearer":
+            // Bare `bearer` is the environment's `token` — the name an imported collection's
+            // bearer auth uses — so a one-off `send --env Prod --auth bearer` carries the same
+            // credential a saved request in that collection would.
+            guard parts.count >= 2 else { return .bearer(token: "{{\(bearerVariable)}}") }
             // The token itself may contain colons, so everything after the first one is the value.
-            guard parts.count >= 2 else { return nil }
-            return .bearer(token: parts.dropFirst().joined(separator: ":"))
+            let token = parts.dropFirst().joined(separator: ":")
+            return token.isEmpty ? nil : .bearer(token: token)
         case "basic":
             guard parts.count >= 3 else { return nil }
             return .basic(username: parts[1], password: parts.dropFirst(2).joined(separator: ":"))

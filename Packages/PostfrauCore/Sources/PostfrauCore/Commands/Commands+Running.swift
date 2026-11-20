@@ -38,8 +38,47 @@ public struct DryRunResult: Sendable, Codable {
     /// body goes out as it is. Said out loud because a dry run that quietly shows the saved body
     /// is exactly how an override that did nothing went unnoticed.
     public var bodyOrigin: String?
+    /// The query parameters that go out, in order, decoded — read back from the URL the server
+    /// will see, so an API key in the query and a `--param` repeated three times both show.
+    public var params: [RequestPatch.QueryParam]
+    /// What `--param` changed — `--param deposit_id ×3` — or nil when the saved params went out.
+    public var paramsOrigin: String?
     public var warnings: [String]
     public var unresolvedVariables: [String]
+
+    public init(
+        method: String, url: String, headers: [HeaderField], bodyPreview: String? = nil,
+        bodyBytes: Int? = nil, bodyOrigin: String? = nil,
+        params: [RequestPatch.QueryParam] = [], paramsOrigin: String? = nil,
+        warnings: [String] = [], unresolvedVariables: [String] = []
+    ) {
+        self.method = method
+        self.url = url
+        self.headers = headers
+        self.bodyPreview = bodyPreview
+        self.bodyBytes = bodyBytes
+        self.bodyOrigin = bodyOrigin
+        self.params = params
+        self.paramsOrigin = paramsOrigin
+        self.warnings = warnings
+        self.unresolvedVariables = unresolvedVariables
+    }
+
+    // Decoded by hand so a dry run from an app older than `params` still reads.
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        method = try c.decode(String.self, forKey: .method)
+        url = try c.decode(String.self, forKey: .url)
+        headers = try c.decodeIfPresent([HeaderField].self, forKey: .headers) ?? []
+        bodyPreview = try c.decodeIfPresent(String.self, forKey: .bodyPreview)
+        bodyBytes = try c.decodeIfPresent(Int.self, forKey: .bodyBytes)
+        bodyOrigin = try c.decodeIfPresent(String.self, forKey: .bodyOrigin)
+        params = try c.decodeIfPresent([RequestPatch.QueryParam].self, forKey: .params) ?? []
+        paramsOrigin = try c.decodeIfPresent(String.self, forKey: .paramsOrigin)
+        warnings = try c.decodeIfPresent([String].self, forKey: .warnings) ?? []
+        unresolvedVariables =
+            try c.decodeIfPresent([String].self, forKey: .unresolvedVariables) ?? []
+    }
 }
 
 extension CommandRunner {
@@ -69,8 +108,9 @@ extension CommandRunner {
         let variableScope = requestID.map { scope(forRequestWithID: $0, overrides: overrides) }
             ?? adHocScope(overrides: overrides)
         let resolver = VariableResolver(scope: variableScope)
+        let saved = request
         let request = try patch.applied(to: request, resolver: resolver)
-        let auth = requestID.map { effectiveAuth(forRequestWithID: $0) } ?? request.auth
+        let auth = try authForSend(request, requestID: requestID, patch: patch, resolver: resolver)
 
         let built: BuiltRequest
         do {
@@ -96,8 +136,106 @@ extension CommandRunner {
             bodyPreview: preview,
             bodyBytes: bytes,
             bodyOrigin: patch.bodyOrigin,
-            warnings: built.warnings + secretWarnings(for: variableScope),
+            params: URLQuery.parse(built.resolvedURL).params
+                .map { RequestPatch.QueryParam(name: $0.key, value: $0.value) },
+            paramsOrigin: patch.paramsOrigin,
+            warnings: built.warnings
+                + Self.queryWarnings(saved: saved, sent: request, patch: patch, includeDisabled: true)
+                + secretWarnings(for: variableScope),
             unresolvedVariables: resolver.resolve(request.url).unresolved)
+    }
+
+    /// The auth a send uses: the saved chain, or what `--auth` put in its place.
+    ///
+    /// An `--auth` whose value does not resolve is refused rather than sent. The builder drops a
+    /// bearer token that resolves to nothing, so `send --auth bearer` with no `token` in the
+    /// environment would go out with no Authorization header at all — and come back 401 with
+    /// nothing to say why.
+    func authForSend(
+        _ request: RequestItem, requestID: UUID?, patch: RequestPatch, resolver: VariableResolver
+    ) throws -> Auth {
+        guard let override = patch.auth else {
+            return requestID.map { effectiveAuth(forRequestWithID: $0) } ?? request.auth
+        }
+        if override == .inherit, requestID == nil {
+            throw CommandError.invalid(
+                "--auth inherit takes the auth of the folder or collection a saved request is in, "
+                    + "and this request is not in one. Use `run <path>`, or --auth bearer.")
+        }
+        let auth = requestID.map { effectiveAuth(forRequestWithID: $0, requestAuth: override) }
+            ?? override
+        let texts: [String] = switch auth {
+        case .bearer(let token): [token]
+        case .basic(let username, let password): [username, password]
+        case .apiKey(let key, let value, _): [key, value]
+        case .none, .inherit: []
+        }
+        let unresolved = texts.flatMap { resolver.resolve($0).unresolved }
+        let empty = !texts.isEmpty && texts.allSatisfy { resolver.resolved($0).isEmpty }
+        if !unresolved.isEmpty || empty {
+            var names: [String] = []
+            for name in unresolved where !names.contains(name) { names.append(name) }
+            let needs = names.isEmpty
+                ? "a value, and it resolved to nothing (a secret this process cannot read does "
+                    + "that: pass --keychain, or set POSTFRAU_SECRET_<NAME>)"
+                : names.map { "{{\($0)}}" }.joined(separator: ", ")
+                    + (loadedWorkspace.activeEnvironment.map {
+                        ", which the environment “\($0.name)” does not define"
+                    } ?? ", and no environment is selected")
+            throw CommandError.invalid(
+                "--auth needs \(needs). Pass --env NAME, --var \(names.first ?? "token")=…, "
+                    + "or the value itself (--auth bearer:TOKEN).")
+        }
+        return auth
+    }
+
+    /// Query parameters that are saved but will not go out, said before anyone wonders why.
+    ///
+    /// - A disabled row in the table. OpenAPI imports every optional parameter switched off, so
+    ///   a run that looks complete in `get` can send none of them. Said in a dry run only: on a
+    ///   real send it would be the same line every time.
+    /// - A key in the saved URL's own query that the table does not have. The table owns the
+    ///   query once it has an enabled row, so that key is dropped — said on every send, because
+    ///   nothing else shows it.
+    static func queryWarnings(
+        saved: RequestItem, sent: RequestItem, patch: RequestPatch, includeDisabled: Bool
+    ) -> [String] {
+        var warnings: [String] = []
+        let sentNames = Set(sent.params.active.map(\.key))
+        let overridden = Set(patch.params.map(\.name))
+
+        if includeDisabled {
+            var disabled: [String] = []
+            for row in saved.params where !row.enabled && !row.key.isEmpty
+                && !sentNames.contains(row.key) && !overridden.contains(row.key)
+                && !disabled.contains(row.key)
+            {
+                disabled.append(row.key)
+            }
+            if !disabled.isEmpty {
+                warnings.append(
+                    "\(disabled.count) saved query \(disabled.count == 1 ? "param is" : "params are") "
+                        + "disabled and will not be sent: \(disabled.joined(separator: ", ")). "
+                        + "--param \(disabled[0])=VALUE sends one for this run.")
+            }
+        }
+
+        if !saved.params.active.isEmpty {
+            var omitted: [String] = []
+            for row in URLQuery.parse(saved.url).params where !row.key.isEmpty
+                && !sentNames.contains(row.key) && !overridden.contains(row.key)
+                && !omitted.contains(row.key)
+            {
+                omitted.append(row.key)
+            }
+            if !omitted.isEmpty {
+                warnings.append(
+                    "the saved URL's query has \(omitted.joined(separator: ", ")), which the params "
+                        + "table does not; the table is what is sent, so "
+                        + (omitted.count == 1 ? "it is" : "they are") + " omitted.")
+            }
+        }
+        return warnings
     }
 
     /// The scope for a request that has no home in a collection: the active environment and the
@@ -204,8 +342,11 @@ extension CommandRunner {
         let resolver = VariableResolver(scope: variableScope)
         // Thrown rather than reported as a failed send: a --field that cannot be applied is the
         // caller's mistake, and nothing has gone near the network.
+        let saved = request
         let request = try patch.applied(to: request, resolver: resolver)
-        let auth = requestID.map { effectiveAuth(forRequestWithID: $0) } ?? request.auth
+        let auth = try authForSend(request, requestID: requestID, patch: patch, resolver: resolver)
+        let queryWarnings = Self.queryWarnings(
+            saved: saved, sent: request, patch: patch, includeDisabled: false)
         let secretValues = HistoryRecorder.secrets(
             in: variableScope, auth: auth, resolver: resolver)
 
@@ -244,7 +385,7 @@ extension CommandRunner {
                 headers: received.headers, body: String(decoding: data, as: UTF8.self),
                 bodyTruncated: received.byteCount > data.count,
                 error: nil, captured: [:],
-                warnings: built.warnings + secretWarnings(for: variableScope))
+                warnings: built.warnings + queryWarnings + secretWarnings(for: variableScope))
         } catch {
             result = RunResult(
                 path: path, name: request.name, method: request.method.rawValue,
@@ -252,7 +393,7 @@ extension CommandRunner {
                 durationMs: Date().timeIntervalSince(started) * 1000, bytes: 0,
                 headers: [], body: nil, bodyTruncated: false,
                 error: CommandRunner.message(for: error), captured: [:],
-                warnings: built.warnings + secretWarnings(for: variableScope))
+                warnings: built.warnings + queryWarnings + secretWarnings(for: variableScope))
         }
 
         // Whatever happened is history before anything else can go wrong.

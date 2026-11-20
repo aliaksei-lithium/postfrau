@@ -51,6 +51,18 @@ enum CLI {
         }
         let parsed = all.droppingVerb()
 
+        // Before anything is read or sent: a flag the verb would ignore is a mistake to report,
+        // not a default to apply. Checked for the Local API path too, where it matters as much.
+        let remote = RemoteAPI.fromEnvironment()
+        if let problem = Flags.problem(verb: verb, parsed, remote: remote != nil) {
+            out.error(problem)
+            return .usage
+        }
+        if let record = parsed.value("--record"), HistoryRecordLevel(rawValue: record) == nil {
+            out.error("--record takes off, metadata, headers or full, not “\(record)”.")
+            return .usage
+        }
+
         switch verb {
         case "version":
             if let endpoint = RemoteAPI.fromEnvironment() {

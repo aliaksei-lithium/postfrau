@@ -46,6 +46,8 @@ Quote values in single quotes. `!`, `$` and `&` are shell metacharacters.
 - `--json` for anything you parse. Human output is aligned text. `run --all --json` is NDJSON.
 - `--dry-run` before anything that writes, and before anything pointed at production.
 - `rm` needs `--yes`. Secrets print as `•••` unless asked for with `--reveal`.
+- A flag the command does not take exits 1 and sends nothing — so does `--param` without `=`.
+  Exit 0 means every flag was used.
 
 ## Variables
 
@@ -62,13 +64,22 @@ postfrau env use prod_deu                              # or pass --env per comma
 ## Changing a saved request for one send
 
 Nothing here is saved; the stored request keeps its body. `--dry-run` ends with
-`body: N bytes, from --body` (or `as saved`) — check it says what you meant.
+`body: N bytes, from --body` (or `as saved`) and `params: N sent, from --param …` — check they
+say what you meant.
 
 ```bash
 postfrau run '<path>' --body @payload.json --dry-run  # replace the body ({{vars}} resolve)
 postfrau run '<path>' --field partner_bank_id=42       # set one JSON field; repeatable
 postfrau run '<path>' -H 'X-Request-ID: abc'           # add or replace a header
+postfrau run '<path>' --param deposit_id=OMA_1 --param deposit_id=OMA_2   # ?deposit_id=…&deposit_id=…
+postfrau run '<path>' --param deposit_id=@ids.txt      # one value per line of the file
+postfrau run '<path>' --param page=                    # send no page at all
+postfrau run '<path>' --auth bearer:abc                # replace the auth (none, inherit, …)
 ```
+
+`--param name=…` replaces every saved row called `name` — enabled or disabled — so repeat it for
+an array. An OpenAPI import keeps optional params and array examples as *disabled* rows: they
+are not sent until you pass them. A dry run lists them in `warnings`.
 
 `--field` values are JSON when they parse (`42`, `true`, `'id="42"'` for a string of digits),
 text otherwise, and `{{variables}}` resolve first. To run the same request once per id:
@@ -95,6 +106,7 @@ postfrau run <folder> --all --json     # every request under it, in order
 postfrau send GET https://api.example.com/health
 postfrau send POST https://api.example.com/users \
   -H 'Content-Type: application/json' -d '{"name":"Ada"}'
+postfrau send GET 'https://api.example.com/v2/x' --env Prod --auth bearer   # Prod's {{token}}
 
 # Edit
 postfrau add 'Acme API' --collection
@@ -127,8 +139,9 @@ literal `/` in a name is `\/`. A UUID works anywhere a path does. `set` changes 
 given.
 
 An OpenAPI import is sendable, not a transcription: `servers[0]` → `{{baseUrl}}`, tags → folders,
-path templates → `{{variables}}`, security → collection auth. JSON only; convert YAML with
-`yq -o=json spec.yaml > spec.json`. Read the warnings — they name what could not be modelled.
+path templates → `{{variables}}`, security → collection auth. JSON or YAML. For a newer version
+of the spec, `import spec.yaml --into "<collection>" --dry-run` shows the merge; drop `--dry-run`
+to apply it (edited fields are kept). Read the warnings — they name what could not be modelled.
 
 ## Capture a token, then use it
 
@@ -149,7 +162,9 @@ after it. No match exits 2; the request itself still succeeded.
   description?, unresolvedVariables[]}` — `auth` is a word, never a credential
 - `run` / `send` → `{path?, name, method, url, status?, reason?, durationMs, bytes, headers[],
   body?, bodyTruncated, error?, captured{}, warnings[]}` — `status` absent and `error` set means
-  it never reached a server
+  it never reached a server. `url` is what the server saw: no `#fragment`
+- `--dry-run` → `{method, url, headers[], params[{name, value}], paramsOrigin?, bodyPreview?,
+  bodyBytes?, bodyOrigin?, warnings[], unresolvedVariables[]}` — `params` is the query as sent
 - `history` → `[{id, sentAt, method, url, status?, durationMs, bytes, source, error?, recorded}]`
 
 `postfrau schema collection|request|environment|history` gives the file formats.
@@ -176,7 +191,8 @@ export POSTFRAU_API_URL=http://127.0.0.1:7717     # only if the port was changed
 ```
 
 `ls`, `find`, `get`, `run`, `send`, `version` then work identically — same output, same exit
-codes, sends still recorded. `add`, `set`, `mv`, `rm`, `import`, `export`, `history` and `env`
+codes, sends still recorded. `run --all` and `send --save-to` need the folder and exit 1; an app
+older than the tool exits 1 rather than ignore `--param` or `--auth`. `add`, `set`, `mv`, `rm`, `import`, `export`, `history` and `env`
 need a real folder and will say so.
 
 Works only while Postfrau is running. If it cannot reach the app, say so and ask the user to

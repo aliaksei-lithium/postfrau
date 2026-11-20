@@ -134,18 +134,36 @@ public enum OpenAPISync {
         ]
     }
 
+    /// One fingerprint per key. Rows that share a key — a form-exploded array is `id=a`, `id=b` —
+    /// are one parameter and are fingerprinted together, in order. A lone row hashes as it always
+    /// has, so a collection imported before arrays were split still matches its base.
     static func rowFingerprints(_ rows: [KeyValue], caseInsensitive: Bool) -> [String: JSONValue] {
-        var out: [String: JSONValue] = [:]
-        for row in rows {
-            let key = caseInsensitive ? row.key.lowercased() : row.key
-            if out[key] == nil { out[key] = .string(rowHash(row)) }
+        groupedRows(rows, caseInsensitive: caseInsensitive).reduce(into: [:]) { out, group in
+            out[group.key] = .string(groupHash(group.rows))
         }
-        return out
     }
 
     static func rowHash(_ row: KeyValue) -> String {
         hash([row.key, row.value, String(row.enabled), row.description ?? ""]
             .joined(separator: "\u{1F}"))
+    }
+
+    static func groupHash(_ rows: [KeyValue]) -> String {
+        rows.count == 1 ? rowHash(rows[0]) : hash(rows.map(rowHash).joined(separator: "\u{1E}"))
+    }
+
+    /// Rows by key, in the order each key first appears.
+    static func groupedRows(
+        _ rows: [KeyValue], caseInsensitive: Bool
+    ) -> [(key: String, rows: [KeyValue])] {
+        var order: [String] = []
+        var groups: [String: [KeyValue]] = [:]
+        for row in rows {
+            let key = caseInsensitive ? row.key.lowercased() : row.key
+            if groups[key] == nil { order.append(key) }
+            groups[key, default: []].append(row)
+        }
+        return order.map { ($0, groups[$0] ?? []) }
     }
 
     static func baseURL(of collection: RequestCollection) -> String? {
@@ -416,37 +434,40 @@ public enum OpenAPISync {
         _ local: [KeyValue], _ remote: [KeyValue], base: [String: JSONValue]?,
         caseInsensitive: Bool
     ) -> ([KeyValue], kept: Bool) {
-        func key(_ row: KeyValue) -> String { caseInsensitive ? row.key.lowercased() : row.key }
-        var localByKey: [String: KeyValue] = [:]
-        for row in local where localByKey[key(row)] == nil { localByKey[key(row)] = row }
-        let remoteKeys = Set(remote.map(key))
+        // Merged a key at a time, where a key may carry several rows (a repeated query param):
+        // they change together or not at all.
+        let localGroups = groupedRows(local, caseInsensitive: caseInsensitive)
+        let localByKey = Dictionary(localGroups.map { ($0.key, $0.rows) }, uniquingKeysWith: { a, _ in a })
+        let remoteGroups = groupedRows(remote, caseInsensitive: caseInsensitive)
+        let remoteKeys = Set(remoteGroups.map(\.key))
 
         var out: [KeyValue] = []
         var kept = false
-        var seen: Set<String> = []
-        for row in remote {
-            let k = key(row)
-            guard seen.insert(k).inserted else { continue }
+        for (k, rows) in remoteGroups {
             let baseHash = base?[k]?.stringValue
             guard let mine = localByKey[k] else {
                 // Deleted by the user since the import: stays deleted. New in the spec: added.
-                if baseHash == nil { out.append(row) }
+                if baseHash == nil { out += rows }
                 continue
             }
-            let lf = rowHash(mine), rf = rowHash(row)
+            let lf = groupHash(mine), rf = groupHash(rows)
             if lf == rf || baseHash == nil || baseHash != lf {
-                out.append(mine)
+                out += mine
                 if lf != rf, let baseHash, baseHash != rf { kept = true }
+            } else if mine.count == rows.count {
+                out += zip(mine, rows).map { mine, row in
+                    var updated = row
+                    updated.id = mine.id
+                    return updated
+                }
             } else {
-                var updated = row
-                updated.id = mine.id
-                out.append(updated)
+                out += rows
             }
         }
-        for row in local where !remoteKeys.contains(key(row)) {
+        for (k, rows) in localGroups where !remoteKeys.contains(k) {
             // Gone from the spec and untouched: it goes. Anything else is the user's.
-            if let baseHash = base?[key(row)]?.stringValue, baseHash == rowHash(row) { continue }
-            out.append(row)
+            if let baseHash = base?[k]?.stringValue, baseHash == groupHash(rows) { continue }
+            out += rows
         }
         return (out, kept)
     }

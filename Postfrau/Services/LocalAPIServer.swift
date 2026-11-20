@@ -210,10 +210,9 @@ actor LocalAPIServer {
                 return HTTPResponse(status: 200, json: try await runner.detail(path: path))
 
             case ("POST", "/v1/run"):
-                let body = try JSONDecoder().decode(LocalAPI.RunBody.self, from: request.body)
-                if let environment = body.environment {
-                    try await runner.selectEnvironment(named: environment)
-                }
+                let body = try LocalAPI.decodeStrictly(LocalAPI.RunBody.self, from: request.body)
+                try await Self.configure(
+                    runner, environment: body.environment, agent: body.agent, record: body.record)
                 // A dry run must not reach the network. The tool asks for this before anything
                 // pointed at production, so getting it wrong here sends the very request the
                 // caller was checking on.
@@ -229,14 +228,14 @@ actor LocalAPIServer {
                     overrides: body.variables ?? [:],
                     bodyCap: body.bodyCap ?? CommandRunner.defaultBodyCap,
                     captures: body.captures ?? [:],
+                    captureAsSecret: body.captureAsSecret ?? false,
                     patch: body.patch ?? RequestPatch())
                 return HTTPResponse(status: 200, json: result)
 
             case ("POST", "/v1/send"):
-                let body = try JSONDecoder().decode(LocalAPI.SendBody.self, from: request.body)
-                if let environment = body.environment {
-                    try await runner.selectEnvironment(named: environment)
-                }
+                let body = try LocalAPI.decodeStrictly(LocalAPI.SendBody.self, from: request.body)
+                try await Self.configure(
+                    runner, environment: body.environment, agent: body.agent, record: body.record)
                 var item = RequestItem(
                     name: "", method: HTTPMethod(rawValue: body.method.uppercased()),
                     url: body.url)
@@ -244,24 +243,62 @@ actor LocalAPIServer {
                 if let text = body.body, !text.isEmpty {
                     item.body = .raw(guessingLanguageOf: text)
                 }
+                if let verifyTLS = body.verifyTLS { item.settings.verifyTLS = verifyTLS }
+                if let follow = body.followRedirects { item.settings.followRedirects = follow }
+                // The same patch `postfrau send` applies on its own side, so the two paths put
+                // a URL's own query and the --param rows together identically.
+                let patch = RequestPatch(params: body.params ?? [], auth: body.auth)
                 if body.dryRun == true {
                     return HTTPResponse(
                         status: 200,
-                        json: try await runner.dryRun(item, overrides: body.variables ?? [:]))
+                        json: try await runner.dryRun(
+                            item, overrides: body.variables ?? [:], patch: patch))
                 }
                 let result = try await runner.send(
                     item,
                     overrides: body.variables ?? [:],
                     bodyCap: body.bodyCap ?? CommandRunner.defaultBodyCap,
-                    captures: body.captures ?? [:])
+                    captures: body.captures ?? [:],
+                    captureAsSecret: body.captureAsSecret ?? false,
+                    patch: patch)
                 return HTTPResponse(status: 200, json: result)
 
             default:
                 return HTTPResponse(status: 404, json: LocalAPI.Failure(error: "no such route"))
             }
-        } catch {
+        } catch let error as LocalAPI.BodyError {
             return HTTPResponse(
-                status: 422, json: LocalAPI.Failure(error: CommandRunner.message(for: error)))
+                status: 400,
+                json: LocalAPI.Failure(
+                    error: CommandRunner.message(for: error), exitCode: ExitCode.usage.rawValue))
+        } catch {
+            // The exit code the tool would have used reading the workspace itself, so `run` of a
+            // path that is not there is 2 either way.
+            let code: ExitCode = switch error as? CommandRunner.CommandError {
+            case .notFound: .notFound
+            case .dataFolderUnavailable: .dataFolderUnavailable
+            case .invalid, nil: .usage
+            }
+            return HTTPResponse(
+                status: 422,
+                json: LocalAPI.Failure(
+                    error: CommandRunner.message(for: error), exitCode: code.rawValue))
+        }
+    }
+
+    /// The per-request choices a caller makes for a send: which environment, who it is
+    /// attributed to, and how much history keeps.
+    private static func configure(
+        _ runner: CommandRunner, environment: String?, agent: String?, record: String?
+    ) async throws {
+        if let environment { try await runner.selectEnvironment(named: environment) }
+        if let agent, !agent.isEmpty { await runner.setSource(.agent(name: agent)) }
+        if let record {
+            guard let level = HistoryRecordLevel(rawValue: record) else {
+                throw CommandRunner.CommandError.invalid(
+                    "--record takes off, metadata, headers or full, not “\(record)”.")
+            }
+            await runner.setRecordLevel(level)
         }
     }
 

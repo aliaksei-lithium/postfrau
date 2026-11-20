@@ -24,11 +24,59 @@ public enum LocalAPI {
     /// An app that predates a field ignores it — JSON decoding drops unknown keys — so a tool that
     /// sends `--body` to an older app gets the saved body sent instead, with nothing to say so.
     /// The tool asks first and refuses rather than let that happen.
-    public static let capabilities = [Capability.requestPatch]
+    public static let capabilities = [
+        Capability.requestPatch, Capability.requestParams, Capability.strictFields,
+    ]
 
     public enum Capability {
         /// `RunBody.patch`: `--body`, `--field` and `--header` on `run`.
         public static let requestPatch = "request-patch"
+        /// `--param` and `--auth` on `run` (`RequestPatch.params`, `.auth`) and on `send`
+        /// (`SendBody.params`, `.auth`, `.verifyTLS`, `.followRedirects`); `--secret`, `--as` and
+        /// `--record` on both (`captureAsSecret`, `agent`, `record`).
+        public static let requestParams = "request-params"
+        /// The app answers 400 to a field it does not know instead of dropping it. From here on,
+        /// a newer tool talking to an older app fails loudly rather than sending less than asked.
+        public static let strictFields = "strict-fields"
+    }
+
+    /// Decodes a request body, refusing any field this build does not know.
+    ///
+    /// `JSONDecoder` drops unknown keys, which is how `--param` sent to an app that predates it
+    /// came back 200 with the param never sent. Checked one level down as well, for `patch`.
+    public static func decodeStrictly<T: StrictBody>(_ type: T.Type, from data: Data) throws -> T {
+        let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        guard let object else { throw BodyError.malformed }
+        var unknown = object.keys.filter { !T.fields.contains($0) }.sorted()
+        if let patch = object["patch"] as? [String: Any] {
+            unknown += patch.keys.filter { !RequestPatch.fields.contains($0) }.sorted()
+                .map { "patch.\($0)" }
+        }
+        guard unknown.isEmpty else { throw BodyError.unknownFields(unknown) }
+        do {
+            return try JSONDecoder().decode(T.self, from: data)
+        } catch {
+            throw BodyError.malformed
+        }
+    }
+
+    public protocol StrictBody: Decodable {
+        /// Every top-level field this build reads.
+        static var fields: Set<String> { get }
+    }
+
+    public enum BodyError: Error, LocalizedError {
+        case malformed
+        case unknownFields([String])
+
+        public var errorDescription: String? {
+            switch self {
+            case .malformed: "the request body is not the JSON this route takes."
+            case .unknownFields(let names):
+                "this Postfrau does not understand \(names.joined(separator: ", ")), so it sent "
+                    + "nothing rather than send less than was asked. Update the app."
+            }
+        }
     }
 
     /// 32 bytes of `SecRandomCopyBytes`, base64url so it survives a shell without quoting.
@@ -89,7 +137,11 @@ public enum LocalAPI {
     }
 
     /// `POST /v1/run`
-    public struct RunBody: Codable, Sendable {
+    public struct RunBody: Codable, Sendable, StrictBody {
+        public static let fields: Set<String> = [
+            "path", "environment", "variables", "captures", "bodyCap", "dryRun", "patch",
+            "captureAsSecret", "agent", "record",
+        ]
         public var path: String
         public var environment: String?
         public var variables: [String: String]?
@@ -101,12 +153,22 @@ public enum LocalAPI {
         public var dryRun: Bool?
         /// `--body`, `--field`, `--header`. Only sent once `ping` has said the app understands it.
         public var patch: RequestPatch?
+        /// `--secret`: store captured values as secrets.
+        public var captureAsSecret: Bool?
+        /// `--as` / `POSTFRAU_AGENT`: who history says sent it. The app's own label when absent.
+        public var agent: String?
+        /// `--record`: the history level for this send.
+        public var record: String?
         public init(
             path: String, environment: String? = nil, variables: [String: String]? = nil,
             captures: [String: String]? = nil, bodyCap: Int? = nil, dryRun: Bool? = nil,
-            patch: RequestPatch? = nil
+            patch: RequestPatch? = nil, captureAsSecret: Bool? = nil, agent: String? = nil,
+            record: String? = nil
         ) {
             self.patch = patch
+            self.captureAsSecret = captureAsSecret
+            self.agent = agent
+            self.record = record
             self.path = path
             self.environment = environment
             self.variables = variables
@@ -117,7 +179,12 @@ public enum LocalAPI {
     }
 
     /// `POST /v1/send` — the ad-hoc form, for a request that is not in any collection.
-    public struct SendBody: Codable, Sendable {
+    public struct SendBody: Codable, Sendable, StrictBody {
+        public static let fields: Set<String> = [
+            "method", "url", "headers", "body", "environment", "variables", "captures", "bodyCap",
+            "dryRun", "params", "auth", "verifyTLS", "followRedirects", "captureAsSecret",
+            "agent", "record",
+        ]
         public var method: String
         public var url: String
         public var headers: [HeaderField]?
@@ -127,11 +194,32 @@ public enum LocalAPI {
         public var captures: [String: String]?
         public var bodyCap: Int?
         public var dryRun: Bool?
+        /// `--param`, in order; a name may repeat.
+        public var params: [RequestPatch.QueryParam]?
+        /// `--auth`. Checked like `run --auth`: a value that does not resolve is refused.
+        public var auth: Auth?
+        /// `--insecure` sends false.
+        public var verifyTLS: Bool?
+        /// `--no-redirects` sends false.
+        public var followRedirects: Bool?
+        public var captureAsSecret: Bool?
+        public var agent: String?
+        public var record: String?
         public init(
             method: String, url: String, headers: [HeaderField]? = nil, body: String? = nil,
             environment: String? = nil, variables: [String: String]? = nil,
-            captures: [String: String]? = nil, bodyCap: Int? = nil, dryRun: Bool? = nil
+            captures: [String: String]? = nil, bodyCap: Int? = nil, dryRun: Bool? = nil,
+            params: [RequestPatch.QueryParam]? = nil, auth: Auth? = nil,
+            verifyTLS: Bool? = nil, followRedirects: Bool? = nil,
+            captureAsSecret: Bool? = nil, agent: String? = nil, record: String? = nil
         ) {
+            self.params = params
+            self.auth = auth
+            self.verifyTLS = verifyTLS
+            self.followRedirects = followRedirects
+            self.captureAsSecret = captureAsSecret
+            self.agent = agent
+            self.record = record
             self.method = method
             self.url = url
             self.headers = headers
@@ -147,6 +235,12 @@ public enum LocalAPI {
     /// Any non-2xx reply. The CLI prints `error` and nothing else.
     public struct Failure: Codable, Sendable {
         public var error: String
-        public init(error: String) { self.error = error }
+        /// What the tool should exit with, so a path that does not exist is 2 and a bad flag
+        /// value is 1 whether the workspace was read locally or by the app. Nil from an older app.
+        public var exitCode: Int32?
+        public init(error: String, exitCode: Int32? = nil) {
+            self.error = error
+            self.exitCode = exitCode
+        }
     }
 }

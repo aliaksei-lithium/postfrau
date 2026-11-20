@@ -76,14 +76,16 @@ enum Run {
 
     // MARK: - Changing a saved request for one run
 
-    /// `--body`, `--field` and `-H` on `run`: what to change about the saved request, this once.
-    /// Shared with `RemoteAPI`, which sends the same patch to the app.
+    /// `--body`, `--field`, `-H`, `--param` and `--auth` on `run`: what to change about the saved
+    /// request, this once. Shared with `RemoteAPI`, which sends the same patch to the app.
     static func patch(from arguments: Arguments) throws -> RequestPatch {
         RequestPatch(
             body: try Edit.readBodyText(arguments),
             fields: arguments.pairs("--field").map { .init(path: $0.key, value: $0.value) },
             headers: arguments.colonPairs("--header", "-H")
-                .map { HeaderField(name: $0.key, value: $0.value) })
+                .map { HeaderField(name: $0.key, value: $0.value) },
+            params: try Edit.queryParams(arguments),
+            auth: try Edit.auth(arguments))
     }
 
     /// Combinations that cannot mean what they say. Checked before anything is read or sent.
@@ -96,8 +98,13 @@ enum Run {
         if arguments.has("--all"), arguments.value("--from-file") != nil {
             return "--from-file runs one request per line; it cannot be combined with --all."
         }
-        if arguments.value("--from-file") == "-", arguments.value("--body", "-d") == "-" {
-            return "--from-file - and --body - cannot both read standard input."
+        let stdinReaders = [
+            arguments.value("--from-file") == "-" ? "--from-file -" : nil,
+            arguments.value("--body", "-d") == "-" ? "--body -" : nil,
+        ].compactMap { $0 } + arguments.pairs("--param").filter { $0.value == "@-" }
+            .map { "--param \($0.key)=@-" }
+        if stdinReaders.count > 1 {
+            return stdinReaders.joined(separator: " and ") + " cannot all read standard input."
         }
         if arguments.value("--from-file") != nil, arguments.value("--each") == nil {
             return "--from-file needs --each NAME: the variable each line is stored in, as in "
@@ -232,7 +239,10 @@ enum Run {
         }
 
         var request = RequestItem(name: "", method: HTTPMethod(rawValue: method.uppercased()), url: url)
-        Edit.apply(arguments, to: &request)
+        try Edit.apply(arguments, to: &request)
+        // Through the patch as well as on the request, so an `--auth` whose variable is missing
+        // from the environment is refused, as it is for `run`, instead of going out without it.
+        let patch = RequestPatch(auth: try Edit.auth(arguments))
 
         let overrides = Dictionary(arguments.pairs("--var"), uniquingKeysWith: { _, new in new })
         let captures = Dictionary(arguments.pairs("--capture"), uniquingKeysWith: { _, new in new })
@@ -240,13 +250,13 @@ enum Run {
             ?? CommandRunner.defaultBodyCap
 
         if arguments.has("--dry-run") {
-            report(try await runner.dryRun(request, overrides: overrides), out)
+            report(try await runner.dryRun(request, overrides: overrides, patch: patch), out)
             return .ok
         }
 
         let result = try await runner.send(
             request, overrides: overrides, bodyCap: cap,
-            captures: captures, captureAsSecret: arguments.has("--secret"))
+            captures: captures, captureAsSecret: arguments.has("--secret"), patch: patch)
 
         // `--save-to` turns a one-off into something worth keeping.
         if let destination = arguments.value("--save-to") {
@@ -325,6 +335,20 @@ enum Run {
         for header in dry.headers {
             out.print("  \(header.name): \(header.value)")
         }
+        // Listed one per line, decoded, so a repeated name is plainly repeated and a long URL
+        // does not have to be read to see what went into its query.
+        if !dry.params.isEmpty {
+            out.print("")
+            let width = dry.params.map { Output.displayWidth($0.name) }.max() ?? 0
+            for param in dry.params {
+                let padding = String(
+                    repeating: " ", count: max(0, width - Output.displayWidth(param.name)))
+                out.print("  ?\(param.name)\(padding) = \(param.value)")
+            }
+        }
+        out.print(out.dim(
+            "params: \(dry.params.count) sent, "
+                + (dry.paramsOrigin.map { "from \($0)" } ?? "as saved")))
         if let preview = dry.bodyPreview, !preview.isEmpty {
             out.print("")
             out.print(preview)

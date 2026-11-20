@@ -230,6 +230,10 @@ public struct OpenAPIImporter: Sendable {
             let value = Self.exampleValue(for: parameter, resolver: resolver)
             switch parameter["in"]?.stringValue {
             case "query":
+                if let rows = Self.arrayQueryRows(for: parameter, named: name, resolver: resolver) {
+                    request.params += rows
+                    continue
+                }
                 request.params.append(KeyValue(
                     key: name, value: value,
                     // A parameter the spec does not require starts switched off, so the first

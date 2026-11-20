@@ -87,20 +87,20 @@ enum RemoteAPI {
                 }
                 let patch = try Run.patch(from: arguments)
                 let batch = try Run.Batch(arguments)
+                let app = Capabilities(endpoint)
                 // An app older than the patch would decode the request without it and send the
                 // saved body — the very thing the caller was overriding. Ask before sending.
                 if !patch.isEmpty || batch?.correlationHeader != nil {
-                    let ping: LocalAPI.Ping = try await get("/v1/ping", [:], endpoint)
-                    guard ping.capabilities?.contains(LocalAPI.Capability.requestPatch) == true
-                    else {
-                        out.error(
-                            "the running Postfrau (\(ping.version)) is older than this tool and "
-                                + "would ignore --body, --field and -H on run, sending the saved "
-                                + "request instead. Update the app, or use `send` with the full "
-                                + "request.")
-                        return .usage
-                    }
+                    try await app.require(
+                        LocalAPI.Capability.requestPatch, for: "--body, --field and -H on run")
                 }
+                let newFlags = newerFlags(arguments, patch: patch)
+                if !newFlags.isEmpty {
+                    try await app.require(
+                        LocalAPI.Capability.requestParams,
+                        for: newFlags.joined(separator: ", ") + " on run")
+                }
+                let attribution = try await attribution(arguments, app)
                 func runBody(
                     _ variables: [String: String]?, _ patch: RequestPatch, dryRun: Bool
                 ) -> LocalAPI.RunBody {
@@ -111,7 +111,10 @@ enum RemoteAPI {
                         captures: pairs(arguments, "--capture"),
                         bodyCap: arguments.value("--max-body").flatMap { Arguments.byteCount($0) },
                         dryRun: dryRun,
-                        patch: patch.isEmpty ? nil : patch)
+                        patch: patch.isEmpty ? nil : patch,
+                        captureAsSecret: arguments.has("--secret") ? true : nil,
+                        agent: attribution,
+                        record: arguments.value("--record"))
                 }
 
                 if let batch {
@@ -135,11 +138,23 @@ enum RemoteAPI {
                 return Run.finish(result, arguments, out)
 
             case "send":
-                guard let method = arguments.positional(0),
+                guard let positionalMethod = arguments.positional(0),
                       let url = arguments.positional(1)
                 else {
                     out.error("send needs a method and a URL: `postfrau send GET https://…`")
                     return .usage
+                }
+                let method = arguments.value("--method", "-X") ?? positionalMethod
+                let params = try Edit.queryParams(arguments)
+                let auth = try Edit.auth(arguments)
+                let app = Capabilities(endpoint)
+                let newFlags = newerFlags(arguments, patch: RequestPatch(params: params, auth: auth))
+                    + (arguments.has("--insecure", "-k") ? ["--insecure"] : [])
+                    + (arguments.has("--no-redirects") ? ["--no-redirects"] : [])
+                if !newFlags.isEmpty {
+                    try await app.require(
+                        LocalAPI.Capability.requestParams,
+                        for: newFlags.joined(separator: ", ") + " on send")
                 }
                 let body = LocalAPI.SendBody(
                     method: method, url: url,
@@ -150,7 +165,14 @@ enum RemoteAPI {
                     variables: pairs(arguments, "--var"),
                     captures: pairs(arguments, "--capture"),
                     bodyCap: arguments.value("--max-body").flatMap { Arguments.byteCount($0) },
-                    dryRun: arguments.has("--dry-run"))
+                    dryRun: arguments.has("--dry-run"),
+                    params: params.isEmpty ? nil : params,
+                    auth: auth,
+                    verifyTLS: arguments.has("--insecure", "-k") ? false : nil,
+                    followRedirects: arguments.has("--no-redirects") ? false : nil,
+                    captureAsSecret: arguments.has("--secret") ? true : nil,
+                    agent: try await attribution(arguments, app),
+                    record: arguments.value("--record"))
                 if arguments.has("--dry-run") {
                     let dry: DryRunResult = try await post("/v1/send", body, endpoint)
                     Run.report(dry, out)
@@ -174,6 +196,62 @@ enum RemoteAPI {
         }
     }
 
+    // MARK: - What the app understands
+
+    /// The flags that need `request-params`: an app older than it would decode the request
+    /// without them and send less than was asked, with a 200 to show for it.
+    private static func newerFlags(_ arguments: Arguments, patch: RequestPatch) -> [String] {
+        var flags: [String] = []
+        if !patch.params.isEmpty { flags.append("--param") }
+        if patch.auth != nil { flags.append("--auth") }
+        if arguments.has("--secret") { flags.append("--secret") }
+        if arguments.has("--as") { flags.append("--as") }
+        if arguments.has("--record") { flags.append("--record") }
+        return flags
+    }
+
+    /// Who the app should say sent this. `--as` was checked against the app already;
+    /// `POSTFRAU_AGENT` is sent only to an app that reads it, because an agent's shell sets it
+    /// for every command, and refusing every command over an older app would be worse than the
+    /// attribution it always had.
+    private static func attribution(_ arguments: Arguments, _ app: Capabilities) async throws -> String? {
+        if let name = arguments.value("--as") { return name }
+        guard let name = ProcessInfo.processInfo.environment["POSTFRAU_AGENT"], !name.isEmpty,
+              try await app.has(LocalAPI.Capability.requestParams)
+        else { return nil }
+        return name
+    }
+
+    /// `ping`, asked at most once per command and only when a flag needs the answer.
+    private final class Capabilities {
+        let endpoint: Endpoint
+        private var ping: LocalAPI.Ping?
+
+        init(_ endpoint: Endpoint) { self.endpoint = endpoint }
+
+        func has(_ capability: String) async throws -> Bool {
+            try await current().capabilities?.contains(capability) == true
+        }
+
+        func require(_ capability: String, for what: String) async throws {
+            let ping = try await current()
+            guard ping.capabilities?.contains(capability) != true else { return }
+            throw Failure(
+                message: "the running Postfrau (\(ping.version)) is older than this tool and "
+                    + "would ignore \(what), sending less than was asked. Nothing was sent. "
+                    + "Update the app, or unset \(LocalAPI.tokenVariable) to read the data "
+                    + "folder directly.",
+                code: .usage)
+        }
+
+        private func current() async throws -> LocalAPI.Ping {
+            if let ping { return ping }
+            let fetched: LocalAPI.Ping = try await RemoteAPI.get("/v1/ping", [:], endpoint)
+            ping = fetched
+            return fetched
+        }
+    }
+
     // MARK: - Transport
 
     private struct Failure: Error {
@@ -186,7 +264,7 @@ enum RemoteAPI {
         return found.isEmpty ? nil : found
     }
 
-    private static func get<T: Decodable>(
+    fileprivate static func get<T: Decodable>(
         _ path: String, _ query: [String: String], _ endpoint: Endpoint
     ) async throws -> T {
         var components = URLComponents(
@@ -231,10 +309,14 @@ enum RemoteAPI {
 
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(status) else {
-            let detail = (try? JSONDecoder().decode(LocalAPI.Failure.self, from: data))?.error
-                ?? "HTTP \(status)"
-            throw Failure(
-                message: detail, code: status == 401 ? .usage : .dataFolderUnavailable)
+            let failure = try? JSONDecoder().decode(LocalAPI.Failure.self, from: data)
+            // The app says which exit code it means. One older than that field answers 422 for
+            // every refusal — a bad flag value, a path that is not there — none of which is the
+            // data folder being unavailable, so they are usage errors rather than 5.
+            let code: ExitCode = failure?.exitCode.flatMap(ExitCode.init(rawValue:))
+                ?? (status == 401 || status == 400 || status == 404 || status == 422
+                    ? .usage : .dataFolderUnavailable)
+            throw Failure(message: failure?.error ?? "HTTP \(status)", code: code)
         }
         do {
             return try JSONDecoder().decode(T.self, from: data)

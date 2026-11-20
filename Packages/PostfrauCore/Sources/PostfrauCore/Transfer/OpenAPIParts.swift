@@ -287,6 +287,60 @@ extension OpenAPIImporter {
         }
     }
 
+    /// The rows for a query parameter whose schema is an array, or nil for any other parameter.
+    ///
+    /// OpenAPI's default for a query array is `style: form, explode: true`: `?id=a&id=b`, the key
+    /// repeated once per value. Sent as one row, the example went out as the JSON text
+    /// `["a","b"]` — one value no server parses as two. So an exploded array becomes one row per
+    /// example value, and a non-exploded one a single row joined the way its style says
+    /// (`a,b`, `a|b`, `a b`).
+    ///
+    /// The rows start switched off even when the parameter is required. They hold the spec's
+    /// example ids, and an id from a spec is not one to send to a real server by accident; the
+    /// row is there to show the shape and be edited, or overridden with `--param`. Being
+    /// disabled also keeps them out of the URL text, which shows only what is sent.
+    static func arrayQueryRows(
+        for parameter: [String: JSONValue], named name: String, resolver: RefResolver
+    ) -> [KeyValue]? {
+        guard let schema = resolver.resolve(parameter["schema"])?.objectValue,
+              schema["type"]?.stringValue == "array"
+                || schema["type"]?.arrayValue?.contains(.string("array")) == true
+        else { return nil }
+
+        let style = parameter["style"]?.stringValue ?? "form"
+        let explode = parameter["explode"]?.boolValue ?? (style == "form")
+
+        let sample: JSONValue? = parameter["example"]
+            ?? (parameter["examples"]?.objectValue?.sorted { $0.key < $1.key }.first?.value
+                .objectValue?["value"])
+            ?? example(for: .object(schema), resolver: resolver)
+        let values: [String] = (sample?.arrayValue ?? sample.map { [$0] } ?? [])
+            .map { $0.stringValue ?? encode($0) }
+
+        var note = parameter["description"]?.stringValue ?? ""
+        let required = parameter["required"]?.boolValue == true
+        let shape = explode ? "repeat \(name)=… once per value" : "one \(name)= holding every value"
+        note += (note.isEmpty ? "" : "\n\n")
+            + "An array (\(shape))"
+            + (required ? ", required" : "")
+            + "; the values here are the spec's example."
+
+        if !explode {
+            let separator = switch style {
+            case "pipeDelimited": "|"
+            case "spaceDelimited": " "
+            default: ","
+            }
+            return [KeyValue(
+                key: name, value: values.joined(separator: separator), enabled: false,
+                description: note)]
+        }
+        let rows = (values.isEmpty ? [""] : values).map {
+            KeyValue(key: name, value: $0, enabled: false, description: note)
+        }
+        return rows
+    }
+
     /// The example value for a parameter, from its own example or its schema.
     static func exampleValue(
         for parameter: [String: JSONValue], resolver: RefResolver

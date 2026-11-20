@@ -3,7 +3,7 @@
 **v1 complete.** All twelve phases of `PLAN.md` are ticked; `Scripts/release.sh` produces
 `dist/Postfrau-2.2.dmg`.
 
-**Build:** green — `make test` passes: 607 Core tests (~6 s) plus the app unit tests.
+**Build:** green — `make test` passes: 629 Core tests (~6 s) plus the app unit tests.
 `make live-test` adds the ones that talk to the real network; `make ui-test` the ones that drive
 the window.
 
@@ -57,7 +57,7 @@ Compose a request, organise it, send it, read the response — the whole loop.
   the same data folder the app is using, writes to the same history, and attributes every send —
   `--as claude` shows up in the app's sidebar with a badge. `--capture token='$.data.token'`
   pulls a value out of a response into the active environment, so a folder can log in and then
-  work. `--dry-run` prints what would go on the wire — including the body's size and whether it came from `--body`/`--field` or is as saved — and records nothing; `run --body @f`, `--field a.b=v` and `-H` change a saved request for one send (also through the Local API), and `run --from-file ids.txt --each id` sends it once per line with a correlation id each (D64); `--json` is a stable
+  work. `--dry-run` prints what would go on the wire — including the body's size and whether it came from `--body`/`--field` or is as saved — and records nothing; `run --body @f`, `--field a.b=v`, `-H`, `--param k=v` (repeatable, `k=@file` for a list) and `--auth` change a saved request for one send (also through the Local API), and `run --from-file ids.txt --each id` sends it once per line with a correlation id each (D64, D71). A flag a verb does not read exits 1, locally and over the Local API; a dry run lists the query params sent and warns about disabled ones; `send --auth bearer` uses the environment's `{{token}}`; URLs are shown as the server sees them, without a `#fragment` (D71); `--json` is a stable
   shape, and `run --all` emits NDJSON. `postfrau skill install` writes the `SKILL.md` an agent
   reads, generated from the same text compiled into the binary so the two cannot disagree.
 - **Import and export**: Postman v2.1 collections in both directions, Postman environments
@@ -105,6 +105,17 @@ tab — or launching with one restored — opens its folders, selects its row an
 3 800 rows into the stress collection. The URL field re-measures when its width changes, so a
 wrapped URL is no longer clipped, and it grows to five lines. All checked in the running app,
 light and dark, against a scratch workspace (`--local-root-name`).
+
+**Nothing the command line is given is dropped** (D71, from client feedback): `run --param` (repeat
+a key for an array, `k=@ids.txt` for a list) and `run --auth` change one send; a flag a verb does
+not take, or a `k=v` without `=`, exits 1 — also through the Local API, where the app now refuses
+fields it does not know and the tool refuses to rely on an older app that would ignore them. A
+form-exploded array query param imports as repeated, disabled rows with the spec's example, not one
+JSON string in the URL. `--dry-run` lists the params it sends and warns about disabled or dropped
+ones. `send --env E --auth bearer` uses E's `{{token}}`, and an `--auth` that does not resolve is
+refused. History, `run` and dry runs show the URL without its `#fragment`, which the server never
+sees, and say so. Checked with Core and CLI tests; the Local API server side is built and unit
+tested through `decodeStrictly`, not driven end to end against the running app.
 
 ## Next — what v1.1 should start with
 

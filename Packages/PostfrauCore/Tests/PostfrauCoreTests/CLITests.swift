@@ -451,6 +451,138 @@ struct CLITests {
         #expect(!dry.stderr.contains("unknown"))
     }
 
+    // MARK: - Flags that used to be dropped
+
+    /// The v3.6.2 report: `run --param` and `--auth` parsed, did nothing, and exited 0.
+    @Test func aFlagTheVerbDoesNotReadIsAUsageError() throws {
+        let temp = TempDirectory()
+        try preparedPayment(temp.url)
+
+        let typo = try run(["run", "Pay/Create", "--parm", "a=1", "--dry-run"], in: temp.url)
+        #expect(typo.code == ExitCode.usage.rawValue)
+        #expect(typo.stderr.contains("--parm"))
+
+        let noEquals = try run(["run", "Pay/Create", "--param", "deposit_id", "--dry-run"], in: temp.url)
+        #expect(noEquals.code == ExitCode.usage.rawValue)
+        #expect(noEquals.stderr.contains("name=value"))
+
+        let badAuth = try run(["send", "GET", "https://x.test", "--auth", "token", "--dry-run"], in: temp.url)
+        #expect(badAuth.code == ExitCode.usage.rawValue)
+        #expect(badAuth.stderr.contains("--auth"))
+
+        let badLevel = try run(["run", "Pay/Create", "--record", "loud", "--dry-run"], in: temp.url)
+        #expect(badLevel.code == ExitCode.usage.rawValue)
+
+        // `ls` has never taken --save-to.
+        #expect(try run(["ls", "--save-to", "x"], in: temp.url).code == ExitCode.usage.rawValue)
+    }
+
+    /// Checked before the socket is opened, so nothing reaches the app — and the answer is 1, not
+    /// the 5 an unreachable app would give.
+    @Test func overTheLocalAPIAnUnknownOrUnforwardableFlagIsAUsageError() throws {
+        let temp = TempDirectory()
+        try prepared(temp.url)
+        let nowhere = [LocalAPI.tokenVariable: "t", LocalAPI.urlVariable: "http://127.0.0.1:9"]
+
+        let typo = try run(["run", "A/B", "--parm", "x=1"], in: temp.url, environment: nowhere)
+        #expect(typo.code == ExitCode.usage.rawValue)
+        #expect(typo.stderr.contains("--parm"))
+
+        let save = try run(
+            ["send", "GET", "https://x.test", "--save-to", "A"], in: temp.url, environment: nowhere)
+        #expect(save.code == ExitCode.usage.rawValue)
+        #expect(save.stderr.contains("Local API"))
+
+        let all = try run(["run", "A", "--all"], in: temp.url, environment: nowhere)
+        #expect(all.code == ExitCode.usage.rawValue)
+    }
+
+    @Test func runParamRepeatsAKeyAndReadsAFile() throws {
+        let temp = TempDirectory()
+        try prepared(temp.url)
+        try run(["add", "BIPS", "--collection"], in: temp.url)
+        let saved = temp.url.appending(path: "request.json")
+        try Data("""
+        {"name": "Rollback", "method": "POST",
+         "url": "https://bips.test/v2/materialization/rollback-daily-interest?date=2026-11-01",
+         "params": [
+           {"key": "date", "value": "2026-11-01"},
+           {"key": "deposit_id", "value": "OMA_example", "enabled": false},
+           {"key": "dry", "value": "true", "enabled": false}
+         ]}
+        """.utf8).write(to: saved)
+        #expect(try run(["add", "BIPS", "--file", saved.path], in: temp.url).code == 0)
+
+        let ids = temp.url.appending(path: "ids.txt")
+        try Data("# November\nOMA_2\n\nOMA_3\n".utf8).write(to: ids)
+
+        let result = try run([
+            "run", "BIPS/Rollback", "--param", "deposit_id=OMA_1",
+            "--param", "deposit_id=@\(ids.path)", "--dry-run", "--json",
+        ], in: temp.url)
+        #expect(result.code == 0, "\(result.stderr)")
+        let dry = try decode(DryRunResult.self, result.stdout)
+        #expect(dry.params.filter { $0.name == "deposit_id" }.map(\.value) == ["OMA_1", "OMA_2", "OMA_3"])
+        #expect(dry.url.hasSuffix("?date=2026-11-01&deposit_id=OMA_1&deposit_id=OMA_2&deposit_id=OMA_3"))
+        #expect(dry.paramsOrigin == "--param deposit_id ×3")
+        #expect(dry.warnings.contains { $0.contains("dry") && $0.contains("disabled") })
+
+        // Nothing was written back.
+        let detail = try run(["get", "BIPS/Rollback", "--json"], in: temp.url)
+        #expect(!detail.stdout.contains("OMA_1"))
+
+        let text = try run(["run", "BIPS/Rollback", "--dry-run"], in: temp.url)
+        #expect(text.stdout.contains("?date"))
+        #expect(text.stdout.contains("params: 1 sent, as saved"))
+        #expect(text.stderr.contains("2 saved query params are disabled"))
+
+        let unreadable = try run(
+            ["run", "BIPS/Rollback", "--param", "deposit_id=@/no/such.txt", "--dry-run"], in: temp.url)
+        #expect(unreadable.code == ExitCode.usage.rawValue)
+    }
+
+    @Test func sendParamKeepsTheURLsOwnQuery() throws {
+        let temp = TempDirectory()
+        try prepared(temp.url)
+        let result = try run([
+            "send", "GET", "https://x.test/a?keep=1", "--param", "id=1", "--param", "id=2",
+            "--dry-run", "--json",
+        ], in: temp.url)
+        #expect(result.code == 0, "\(result.stderr)")
+        #expect(try decode(DryRunResult.self, result.stdout).url == "https://x.test/a?keep=1&id=1&id=2")
+    }
+
+    @Test func sendAuthBearerUsesTheEnvironmentsToken() throws {
+        let temp = TempDirectory()
+        try prepared(temp.url)
+        try run(["env", "add", "BIPS Production DEU"], in: temp.url)
+        try run(["env", "set", "BIPS Production DEU", "token=abc"], in: temp.url)
+
+        let withToken = try run([
+            "send", "GET", "https://bips.test/v2/x", "--env", "BIPS Production DEU",
+            "--auth", "bearer", "--dry-run", "--json",
+        ], in: temp.url)
+        #expect(withToken.code == 0, "\(withToken.stderr)")
+        #expect(try decode(DryRunResult.self, withToken.stdout).headers
+            .contains { $0.name.lowercased() == "authorization" })
+
+        let without = try run(
+            ["send", "GET", "https://bips.test/v2/x", "--auth", "bearer", "--dry-run"], in: temp.url)
+        #expect(without.code == ExitCode.usage.rawValue)
+        #expect(without.stderr.contains("{{token}}"))
+    }
+
+    @Test func theDryRunURLIsTheOneTheServerSees() throws {
+        let temp = TempDirectory()
+        try prepared(temp.url)
+        let result = try run([
+            "send", "GET", "https://bips.test/swagger/index.html#/v2/materialization/x", "--dry-run",
+        ], in: temp.url)
+        #expect(result.code == 0)
+        #expect(result.stdout.contains("GET https://bips.test/swagger/index.html\n"))
+        #expect(result.stderr.contains("never sent"))
+    }
+
     // MARK: - Schema and skill
 
     @Test func schemaDescribesEveryDocument() throws {

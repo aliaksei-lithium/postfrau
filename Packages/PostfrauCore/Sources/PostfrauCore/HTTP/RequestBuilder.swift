@@ -27,7 +27,8 @@ public enum BodyPayload: Sendable {
 public struct BuiltRequest: Sendable {
     public var urlRequest: URLRequest
     public var payload: BodyPayload
-    /// The URL after variable substitution and query composition — what history records.
+    /// The URL after variable substitution and query composition, without any `#fragment` — the
+    /// URL the server sees, and what history records.
     public var resolvedURL: String
     /// Headers Postfrau added on the user's behalf, shown greyed-out in the Headers tab.
     public var automaticHeaders: [HeaderField]
@@ -155,6 +156,21 @@ public struct RequestBuilder: Sendable {
             }
         }
 
+        // A fragment never leaves the machine: `URLSession` sends the path and query only. A URL
+        // pasted from Swagger UI (`…/index.html#/v2/payments`) therefore reaches a different
+        // endpoint than it appears to name, and recording it with the fragment hid that.
+        var wireURL = url
+        if let fragment = url.fragment(percentEncoded: false) {
+            var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+            components?.fragment = nil
+            wireURL = components?.url ?? url
+            let path = wireURL.path(percentEncoded: true)
+            warnings.append(
+                "The URL ends in #\(fragment), which is never sent: the server sees "
+                    + "\(path.isEmpty ? "/" : path)"
+                    + (fragment.hasPrefix("/") ? ". A Swagger UI link? The endpoint is the part after #." : "."))
+        }
+
         let unresolved = collectUnresolved(request, resolver: resolver)
         if !unresolved.isEmpty {
             warnings.append(
@@ -163,7 +179,7 @@ public struct RequestBuilder: Sendable {
         }
 
         return BuiltRequest(
-            urlRequest: urlRequest, payload: payload, resolvedURL: url.absoluteString,
+            urlRequest: urlRequest, payload: payload, resolvedURL: wireURL.absoluteString,
             automaticHeaders: automatic, warnings: warnings, accessedURLs: accessed)
     }
 

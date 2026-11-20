@@ -41,9 +41,11 @@ enum Help {
         \(out.bold("SENDING"))
           run <path> [--all] [--var k=v] [--capture n=$.a.b] [--dry-run]
                      [--body text|@file|-] [--field a.b=v] [-H 'k: v']
+                     [--param k=v|k=@file] [--auth SPEC]
                      [--from-file f --each NAME] [--correlation-header H]
                      [--fail] [--max-body 64k] [--out f] [--stop-on-error]
-          send <METHOD> <url> [-H 'k: v'] [-d body|@file|-] [--save-to <folder>]
+          send <METHOD> <url> [-H 'k: v'] [-d body|@file|-] [--param k=v]
+                     [--auth bearer|bearer:T|…] [--save-to <folder>]
 
         \(out.bold("ENVIRONMENTS"))
           env ls | env get <name> | env add <name>
@@ -82,8 +84,8 @@ enum Help {
           address. Other commands need a real folder and will say so.
 
         \(out.bold("EXIT CODES"))
-          0 ok · 1 usage · 2 not found · 3 network · 4 HTTP >= 400 with --fail
-          5 data folder unavailable
+          0 ok · 1 usage — including a flag the command does not take · 2 not found
+          3 network · 4 HTTP >= 400 with --fail · 5 data folder unavailable
         """)
     }
 
@@ -104,6 +106,13 @@ enum Help {
                                 JSON if it parses (42, true, "42", {"x":1}), else a string,
                                 and {{variables}} resolve first: --field id={{bank}}
               -H 'k: v'         add a header, or replace one of the same name
+              --param k=v       a query param; repeat k to send it repeatedly
+                                (?k=a&k=b). Replaces every saved row named k, enabled
+                                or disabled. k=@file reads one value per line (# is a
+                                comment); k= sends no k at all
+              --auth SPEC       none | inherit | bearer (the environment's {{token}}) |
+                                bearer:T | basic:U:P | apikey:K:V[:query]. Refused if
+                                its {{variables}} have no value
 
             One request per line of a file:
               --from-file FILE  run once per non-blank line (# starts a comment); - is stdin
@@ -123,12 +132,17 @@ enum Help {
             A capture from one request is visible to the next, which is what makes
             `run --all` useful: log in, capture the token, call the endpoint.
 
-            --dry-run prints the body that would go out, its size in bytes, and
-            where it came from ("as saved", "from --body", "from --field id").
+            --dry-run prints the URL the server will see (a #fragment never leaves),
+            each query param on its own line, the body that would go out, its size
+            in bytes, and where each came from ("as saved", "from --body",
+            "from --param id ×3"). It warns about saved params that are disabled.
+
+            A flag run does not take exits 1 and nothing is sent.
 
             Examples:
               postfrau run "Payments/Create" --body @payload.json --dry-run
               postfrau run "Payments/Create" --field partner_bank_id=42
+              postfrau run "Interest/Rollback" --param deposit_id=@ids.txt --dry-run
               postfrau run "Payments/Create" --from-file banks.txt --each bank \\
                   --field partner_bank_id={{bank}} --correlation-header X-Correlation-ID --json
             """)
@@ -138,10 +152,16 @@ enum Help {
 
               -H 'k: v'         a header; repeatable
               -d body | @file | -   a body, from the argument, a file, or stdin
-              --param k=v       a query parameter; repeatable
-              --auth SPEC       none | bearer:T | basic:U:P | apikey:K:V[:query]
+              --param k=v       a query parameter; repeatable, and a repeated k is sent
+                                repeatedly. k=@file reads one value per line. Joins
+                                any query already in the URL
+              --auth SPEC       none | bearer | bearer:T | basic:U:P | apikey:K:V[:query].
+                                Bare `bearer` is {{token}} from --env, the name an
+                                imported collection's bearer auth uses; refused when
+                                the environment has no token
               --save-to <folder-path> --name N   keep it afterwards
               --insecure, -k    do not verify TLS
+              --no-redirects    do not follow redirects
               --dry-run, --fail, --var, --capture, --max-body, --out  as for run
             """)
         case "history":
