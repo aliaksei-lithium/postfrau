@@ -5,8 +5,8 @@
 <h1 align="center">Postfrau</h1>
 
 <p align="center">
-  An HTTP client for macOS 26.<br>
-  Collections are JSON files in a folder you choose — no account, no cloud, nothing uploaded.
+  A native HTTP client for macOS 26.<br>
+  Your collections are plain JSON files in a folder you choose. No account, no cloud.
 </p>
 
 <p align="center">
@@ -20,124 +20,56 @@
 ## Install
 
 Download the DMG from [Releases](https://github.com/aliaksei-lithium/postfrau/releases) and drag
-Postfrau to Applications.
-
-The app is ad-hoc signed, so macOS quarantines it. Either **right-click → Open** the first time,
-or clear the flag:
+Postfrau to Applications. The app is not notarized, so the first time either right-click it and
+choose **Open**, or run:
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/Postfrau.app
 ```
 
-If macOS still refuses with *"Postfrau is damaged"*, that is the quarantine flag — the command
-above fixes it.
-
 ## Features
 
-- Request editor: params mirrored with the URL, headers, all auth schemes, every body mode
-- Response viewer: pretty / raw / preview / headers / cookies, images and PDFs inline, hex for binary
-- Collections and folders with inherited variables and auth
-- Environments and globals; secrets live in the Keychain, never in the files
-- History of every send, redacted by default
-- Light, dark or follow-the-system, set per machine — the collections folder stays shared
-- Sync by pointing the data folder at iCloud Drive, Dropbox or a git checkout
-- Import OpenAPI 3.x (JSON or YAML) and update a collection from a newer spec; import/export
-  Postman v2.1 and cURL, both directions
-- `postfrau` CLI that does all of the above from a shell, including `find` across every request
-- A loopback API, so an agent in a sandbox that cannot read your files can still list and send
+- **Local and private.** Collections are files you can sync with iCloud Drive, Dropbox or git.
+  Secrets stay in the Keychain.
+- **OpenAPI and Postman import.** An OpenAPI 3.x spec (JSON or YAML) becomes a collection you can
+  send from right away, and you can update it from a newer spec without losing your edits.
+  Postman collections and cURL commands import and export.
+- **Environments and history.** Variables and auth are inherited from folders and collections.
+  Every send is recorded, with credentials redacted.
+- **A command line tool.** `postfrau` can find, run and edit everything the app has, so you can
+  script it or hand it to an AI agent.
 
-## Importing an API
+## Command line
 
-```bash
-postfrau import openapi.yaml     # OpenAPI 3.x in JSON or YAML, or a Postman collection/environment
-```
-
-Or **File ▸ Import…**, or drop the file on the sidebar.
-
-An OpenAPI import produces a collection you can send from: `servers[0]` becomes `{{baseUrl}}`,
-tags become folders, path templates become `{{variables}}`, security becomes the collection's
-auth, and bodies come from the spec's examples — or are synthesised from its schemas. YAML is read
-by Postfrau's own parser for the subset spec files use (anchors, block scalars and flow style
-included).
-
-### Updating from a newer spec
+Install it from **Settings ▸ Advanced**.
 
 ```bash
-postfrau import openapi.yaml --into "Acme API" --dry-run   # what would change
-postfrau import openapi.yaml --into "Acme API"             # apply it
-```
-
-In the app: right-click the collection ▸ **Update from OpenAPI…**, or import a spec whose title
-matches an existing collection and choose **Update Collection**. Requests are matched by method and
-path; new operations are added beside their siblings, changed ones are updated, and any field you
-edited since the import is kept (the report lists the ones the spec changed too). Operations the
-spec dropped move to a "Removed from spec" folder — or are deleted with `--prune`. One ⌘Z undoes it
-in the app.
-
-## CLI
-
-```bash
-postfrau find deposit balance                 # search names, paths, descriptions, URLs
-postfrau get 'Acme API/Users/List users'      # stored URL, resolved URL, what is unresolved
-postfrau run 'Acme API/Users/List users' --env staging --var user_id=42 --json
-postfrau send POST https://api.example.com/users -H 'Content-Type: application/json' -d '{"name":"Ada"}'
+postfrau import openapi.yaml                       # add a collection from a spec
+postfrau find deposit balance                      # search every request
+postfrau run 'Acme API/Users/Get user' --env staging --var user_id=42
+postfrau run 'Acme API/Users/List' --param id=1 --param id=2 --dry-run   # what would be sent
+postfrau send GET https://api.example.com/health
 postfrau history --last 20
 ```
 
-`run` can change a saved request for one send, without saving anything — check it first with
-`--dry-run`, which prints the URL the server will see, each query param, the body and its size,
-and where each came from:
+Overrides such as `--param`, `--body`, `--field`, `-H` and `--auth` change one send without
+touching the saved request. `postfrau <command> --help` lists the rest.
 
-```bash
-postfrau run 'Payments/Create' --body @payload.json --dry-run   # replace the body; {{vars}} resolve
-postfrau run 'Payments/Create' --field partner_bank_id=42        # set one JSON field
-postfrau run 'Payments/Create' -H 'X-Request-ID: abc'            # add or replace a header
-postfrau run 'Interest/Rollback' --param deposit_id=OMA_1 --param deposit_id=OMA_2
-postfrau run 'Interest/Rollback' --param deposit_id=@ids.txt     # one value per line
-postfrau send GET 'https://api.example.com/v2/x' --env Prod --auth bearer   # Prod's {{token}}
-```
-
-A flag a command does not take exits 1 and sends nothing — locally and through the Local API.
-
-And send the same request once per line of a file — one NDJSON line per send with `--json`,
-each carrying its input and its own correlation id:
-
-```bash
-postfrau run 'Payments/Create' --from-file banks.txt --each bank \
-  --field 'partner_bank_id={{bank}}' --correlation-header X-Correlation-ID --json
-```
-
-Install it from **Settings ▸ Advanced**, or `make install` from a checkout.
-
-For agents: `postfrau skill install --to .claude/skills/postfrau` writes a `SKILL.md` with the
-commands, JSON shapes and exit codes.
-
-## Build
-
-Needs macOS 26, Xcode 26 and [XcodeGen](https://github.com/yonaskolb/XcodeGen). No other dependencies.
-
-```bash
-make gen      # generate the Xcode project
-make build    # app + CLI
-make run
-make test     # 607 Core tests + app tests
-make release  # signed DMG in dist/
-```
-
-Set `CODESIGN_IDENTITY` to sign with a Developer ID, `NOTARY_PROFILE` to notarize. Both optional.
+**For AI agents:** `postfrau skill install` writes a `SKILL.md` that teaches an agent the
+commands. Pass `--as <name>` and the app's history shows which agent sent each request.
 
 ## Where your data lives
 
-| What | Where | Synced |
-|---|---|---|
-| Collections, environments, globals | the folder you choose | by your sync client |
-| Secrets | login Keychain | only with iCloud Keychain on |
-| History, settings, window state | app container | never |
+| What | Where |
+|---|---|
+| Collections, environments | the folder you choose |
+| Secrets | the login Keychain |
+| History, settings | the app's container, on this Mac only |
 
-## Not Supported
+## Not supported
 
-No scripting, test assertions, mock server, team sync, WebSocket or gRPC.
+Scripting, test assertions, mock servers, team sync, WebSocket and gRPC.
 
-## Licence
+---
 
-MIT
+MIT licence · [Building from source](docs/building.md)
